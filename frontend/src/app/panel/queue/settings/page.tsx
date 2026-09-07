@@ -124,8 +124,8 @@ export default function QueueSettingsPage() {
     try {
       await api.queues.createLane(queueId, { name: laneDraft.name.trim(), minPartySize: Number(laneDraft.minPartySize), maxPartySize: laneDraft.maxPartySize ? Number(laneDraft.maxPartySize) : null, priority: Number(laneDraft.priority), capacityMode: laneDraft.capacityMode, maxSize: laneDraft.maxSize ? Number(laneDraft.maxSize) : null, timeFactor: Number(laneDraft.timeFactor), active: true })
       setLaneDraft({ ...laneDraft, name: '' }); await refreshLanes()
-      setLaneFeedback({ kind: 'info', message: 'Lane added and enabled.' })
-    } catch (cause) { setLaneFeedback({ kind: 'error', message: cause instanceof ApiError ? cause.message : 'Could not add this lane.' }) } finally { setLaneBusy(false) }
+      setLaneFeedback({ kind: 'info', message: t('lanes.added') })
+    } catch (cause) { setLaneFeedback({ kind: 'error', message: cause instanceof ApiError ? cause.message : t('lanes.addFailed') }) } finally { setLaneBusy(false) }
   }
 
   const toggleLane = async (lane: QueueLaneView) => {
@@ -134,15 +134,15 @@ export default function QueueSettingsPage() {
     try {
       await api.queues.updateLane(queueId, lane.id, { name: lane.name, minPartySize: lane.minPartySize, maxPartySize: lane.maxPartySize ?? null, priority: lane.priority, capacityMode: lane.capacityMode, maxSize: lane.maxSize ?? null, timeFactor: lane.timeFactor, active: !lane.active })
       await refreshLanes()
-      setLaneFeedback({ kind: 'info', message: `${lane.name} ${lane.active ? 'disabled' : 'enabled'}.` })
-    } catch (cause) { setLaneFeedback({ kind: 'error', message: cause instanceof ApiError ? cause.message : 'Could not update this lane.' }) } finally { setLaneBusy(false) }
+      setLaneFeedback({ kind: 'info', message: t('lanes.toggled', { name: lane.name, state: lane.active ? t('lanes.stateOff') : t('lanes.stateOn') }) })
+    } catch (cause) { setLaneFeedback({ kind: 'error', message: cause instanceof ApiError ? cause.message : t('lanes.toggleFailed') }) } finally { setLaneBusy(false) }
   }
 
   const deleteLane = async (lane: QueueLaneView) => {
     if (!queueId) return
     setLaneBusy(true); setError(null); setLaneFeedback(null)
-    try { await api.queues.removeLane(queueId, lane.id); await refreshLanes(); setLaneFeedback({ kind: 'info', message: `${lane.name} deleted.` }) }
-    catch (cause) { setLaneFeedback({ kind: 'error', message: cause instanceof ApiError ? cause.message : 'Could not delete this lane.' }) } finally { setLaneBusy(false) }
+    try { await api.queues.removeLane(queueId, lane.id); await refreshLanes(); setLaneFeedback({ kind: 'info', message: t('lanes.deleted', { name: lane.name }) }) }
+    catch (cause) { setLaneFeedback({ kind: 'error', message: cause instanceof ApiError ? cause.message : t('lanes.deleteFailed') }) } finally { setLaneBusy(false) }
   }
 
   if (queueId === null) return <Alert kind="error">{t('board.noQueueSelected')}</Alert>
@@ -164,11 +164,11 @@ export default function QueueSettingsPage() {
 
       <div className="space-y-6">
         <Card>
-          <CardHeader title="Call strategy" description="Controls which lane the global Call next button chooses." />
-          <SelectField label="Global calls" value={callStrategy} onChange={(e) => setCallStrategy(e.target.value as CallStrategy)}>
-            <option value="GLOBAL_AGE">Oldest ticket overall</option>
-            <option value="LANE_PRIORITY">Highest-priority active lane</option>
-            <option value="ROUND_ROBIN">Round robin between lanes</option>
+          <CardHeader title={t('lanes.strategyTitle')} description={t('lanes.strategyHint')} />
+          <SelectField label={t('lanes.strategyLabel')} value={callStrategy} onChange={(e) => setCallStrategy(e.target.value as CallStrategy)}>
+            <option value="GLOBAL_AGE">{t('lanes.strategyOldest')}</option>
+            <option value="LANE_PRIORITY">{t('lanes.strategyPriority')}</option>
+            <option value="ROUND_ROBIN">{t('lanes.strategyRoundRobin')}</option>
           </SelectField>
         </Card>
 
@@ -187,23 +187,23 @@ export default function QueueSettingsPage() {
         </Card>
 
         <Card>
-          <CardHeader title="Group-size lanes" description="Customers are assigned automatically by party size. Active ranges cannot overlap. Time factor adjusts each lane's ETA relative to the base service time." />
+          <CardHeader title={t('lanes.title')} description={t('lanes.hint')} />
           <div className="space-y-3">
             {laneFeedback ? <Alert kind={laneFeedback.kind}>{laneFeedback.message}</Alert> : null}
             {(queue.lanes ?? []).map((lane) => (
               <div key={lane.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-raised px-3 py-3">
-                <div><p className="font-medium">{lane.name}</p><p className="text-xs text-muted">{lane.minPartySize}–{lane.maxPartySize ?? '∞'} people · {lane.capacityMode.toLowerCase()} · ×{lane.timeFactor}</p></div>
-                <div className="flex gap-2"><Button type="button" size="sm" variant="ghost" loading={laneBusy} disabled={laneBusy || !isOwner} onClick={() => void toggleLane(lane)}>{lane.active ? 'Disable' : 'Enable'}</Button><Button type="button" size="sm" variant="ghost" disabled={laneBusy || lane.active || !isOwner} onClick={() => setLaneToDelete(lane)}>Delete</Button></div>
+                <div><p className="font-medium">{lane.name}</p><p className="text-xs text-muted">{lane.minPartySize}–{lane.maxPartySize ?? '∞'} {t('lanes.people')} · ×{lane.timeFactor}</p></div>
+                <div className="flex gap-2"><Button type="button" size="sm" variant="ghost" loading={laneBusy} disabled={laneBusy || !isOwner} onClick={() => void toggleLane(lane)}>{lane.active ? t('lanes.disable') : t('lanes.enable')}</Button><Button type="button" size="sm" variant="ghost" disabled={laneBusy || lane.active || !isOwner} onClick={() => setLaneToDelete(lane)}>{t('lanes.delete')}</Button></div>
               </div>
             ))}
             <form onSubmit={(event) => { event.preventDefault(); void addLane() }} className="grid gap-3 border-t border-line pt-4 sm:grid-cols-2">
-              <Field label="Lane name" value={laneDraft.name} onChange={(e) => setLaneDraft({ ...laneDraft, name: e.target.value })} placeholder="1–2 people" required />
-              <Field label="Minimum people" type="number" min={1} value={laneDraft.minPartySize} onChange={(e) => setLaneDraft({ ...laneDraft, minPartySize: e.target.value })} required />
-              <Field label="Maximum people" optional type="number" min={1} value={laneDraft.maxPartySize} onChange={(e) => setLaneDraft({ ...laneDraft, maxPartySize: e.target.value })} />
-              <Field label="Time factor" type="number" min={0.001} step={0.1} value={laneDraft.timeFactor} onChange={(e) => setLaneDraft({ ...laneDraft, timeFactor: e.target.value })} hint="Multiplier applied to this lane's ETA: 1.0 = base time, 1.5 = 50% longer, 0.5 = half the time." required />
-              <SelectField label="Capacity counts" value={laneDraft.capacityMode} onChange={(e) => setLaneDraft({ ...laneDraft, capacityMode: e.target.value as LaneCapacityMode })}><option value="GROUPS">Groups</option><option value="PERSONS">People</option></SelectField>
-              <Field label="Lane capacity" optional type="number" min={1} value={laneDraft.maxSize} onChange={(e) => setLaneDraft({ ...laneDraft, maxSize: e.target.value })} />
-              <Button type="submit" loading={laneBusy} disabled={!isOwner}>Add lane</Button>
+              <Field label={t('lanes.name')} value={laneDraft.name} onChange={(e) => setLaneDraft({ ...laneDraft, name: e.target.value })} placeholder={t('lanes.namePlaceholder')} required />
+              <Field label={t('lanes.min')} type="number" min={1} value={laneDraft.minPartySize} onChange={(e) => setLaneDraft({ ...laneDraft, minPartySize: e.target.value })} required />
+              <Field label={t('lanes.max')} optional type="number" min={1} value={laneDraft.maxPartySize} onChange={(e) => setLaneDraft({ ...laneDraft, maxPartySize: e.target.value })} />
+              <Field label={t('lanes.timeFactor')} type="number" min={0.001} step={0.1} value={laneDraft.timeFactor} onChange={(e) => setLaneDraft({ ...laneDraft, timeFactor: e.target.value })} hint={t('lanes.timeFactorHint')} required />
+              <SelectField label={t('lanes.capacityMode')} value={laneDraft.capacityMode} onChange={(e) => setLaneDraft({ ...laneDraft, capacityMode: e.target.value as LaneCapacityMode })}><option value="GROUPS">{t('lanes.capacityGroups')}</option><option value="PERSONS">{t('lanes.capacityPersons')}</option></SelectField>
+              <Field label={t('lanes.capacity')} optional type="number" min={1} value={laneDraft.maxSize} onChange={(e) => setLaneDraft({ ...laneDraft, maxSize: e.target.value })} />
+              <Button type="submit" loading={laneBusy} disabled={!isOwner}>{t('lanes.add')}</Button>
             </form>
           </div>
         </Card>
@@ -351,9 +351,9 @@ export default function QueueSettingsPage() {
       />
       <ConfirmDialog
         open={laneToDelete !== null}
-        title="Delete this lane?"
+        title={t('lanes.confirmDeleteTitle')}
         description={laneToDelete ? `“${laneToDelete.name}” can only be deleted once it is disabled and has no active entries.` : ''}
-        confirmLabel="Delete lane"
+        confirmLabel={t('lanes.confirmDelete')}
         destructive
         onConfirm={() => {
           if (laneToDelete) void deleteLane(laneToDelete)
