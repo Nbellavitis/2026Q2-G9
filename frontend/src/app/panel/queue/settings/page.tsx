@@ -200,7 +200,7 @@ export default function QueueSettingsPage() {
               <Field label={t('lanes.name')} value={laneDraft.name} onChange={(e) => setLaneDraft({ ...laneDraft, name: e.target.value })} placeholder={t('lanes.namePlaceholder')} required />
               <Field label={t('lanes.min')} type="number" min={1} value={laneDraft.minPartySize} onChange={(e) => setLaneDraft({ ...laneDraft, minPartySize: e.target.value })} required />
               <Field label={t('lanes.max')} optional type="number" min={1} value={laneDraft.maxPartySize} onChange={(e) => setLaneDraft({ ...laneDraft, maxPartySize: e.target.value })} />
-              <Field label={t('lanes.timeFactor')} type="number" min={0.001} step={0.1} value={laneDraft.timeFactor} onChange={(e) => setLaneDraft({ ...laneDraft, timeFactor: e.target.value })} hint={t('lanes.timeFactorHint')} required />
+              <Field label={t('lanes.timeFactor')} type="number" min={0.1} step="any" value={laneDraft.timeFactor} onChange={(e) => setLaneDraft({ ...laneDraft, timeFactor: e.target.value })} hint={t('lanes.timeFactorHint')} required />
               <SelectField label={t('lanes.capacityMode')} value={laneDraft.capacityMode} onChange={(e) => setLaneDraft({ ...laneDraft, capacityMode: e.target.value as LaneCapacityMode })}><option value="GROUPS">{t('lanes.capacityGroups')}</option><option value="PERSONS">{t('lanes.capacityPersons')}</option></SelectField>
               <Field label={t('lanes.capacity')} optional type="number" min={1} value={laneDraft.maxSize} onChange={(e) => setLaneDraft({ ...laneDraft, maxSize: e.target.value })} />
               <Button type="submit" loading={laneBusy} disabled={!isOwner}>{t('lanes.add')}</Button>
