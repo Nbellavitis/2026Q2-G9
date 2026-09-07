@@ -208,7 +208,10 @@ public class NotificationService {
                 entry.getId(), type, entry.getNotificationCycle(), channel, destination,
                 clip(subject, MAX_SUBJECT), clip(body, MAX_BODY), clock.instant()));
 
-        eventRecorder.recordBySystem(entry.getQueue().getId(), entry.getId(), EventType.NOTIFICATION_SENT,
+        // Queued, not sent: delivery happens after commit and can still fail. Recording it as sent here
+        // produced two "sent" entries per notification, and a "sent" followed by a "failed" whenever
+        // the mail server was down.
+        eventRecorder.recordBySystem(entry.getQueue().getId(), entry.getId(), EventType.NOTIFICATION_QUEUED,
                 "type=%s channel=%s locale=%s".formatted(type, channel, entry.getLocale()));
         publisher.publishEvent(new NotificationQueuedEvent(record.getId()));
     }

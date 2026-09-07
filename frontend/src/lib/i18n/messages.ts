@@ -389,6 +389,8 @@ export const en = {
   'event.ENTRY_LEFT': 'Left the queue',
   'event.ENTRY_NO_SHOW': 'Marked as no show',
   'event.ENTRY_REQUEUED': 'Put back in line',
+  'event.NOTIFICATION_QUEUED': 'Alert prepared',
+  'event.NOTIFICATION_FAILED': 'We could not deliver the alert',
   'event.NOTIFICATION_SENT': 'Notification sent',
 
   // Notification types

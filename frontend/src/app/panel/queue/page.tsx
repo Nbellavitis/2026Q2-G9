@@ -47,6 +47,11 @@ export default function QueueBoardPage() {
   const [calling, setCalling] = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
   const [events, setEvents] = useState<QueueEventView[]>([])
+
+  // The timeline is the business's record of its own line: who was called, who was served, who never
+  // showed. Handing a notification to the mail queue is our plumbing, and it arrives paired with the
+  // delivery a moment later, so showing both put two near-identical rows on every alert.
+  const visibleEvents = events.filter((event) => event.type !== 'NOTIFICATION_QUEUED')
   const [showActivity, setShowActivity] = useState(false)
 
   useEffect(() => setTokenState(getToken()), [])
@@ -256,14 +261,13 @@ export default function QueueBoardPage() {
         </button>
         {showActivity ? (
           <ul className="mt-2 divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface">
-            {events.length === 0 ? (
+            {visibleEvents.length === 0 ? (
               <li className="px-4 py-3 text-sm text-faint">{t('board.noActivity')}</li>
             ) : (
-              events.map((event) => (
+              visibleEvents.map((event) => (
                 <li key={event.id} className="flex items-baseline justify-between gap-4 px-4 py-2.5 text-sm">
                   <span>
                     {eventLabel(t, event.type)}
-                    {event.detail ? <span className="ml-2 text-xs text-faint">{event.detail}</span> : null}
                   </span>
                   <span className="shrink-0 text-xs text-faint tnum">{formatClock(event.occurredAt)}</span>
                 </li>

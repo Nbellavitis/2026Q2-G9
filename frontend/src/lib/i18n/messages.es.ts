@@ -389,6 +389,8 @@ export const es: Record<MessageKey, string> = {
   'event.ENTRY_LEFT': 'Salió de la fila',
   'event.ENTRY_NO_SHOW': 'Marcado como ausente',
   'event.ENTRY_REQUEUED': 'Devuelto a la fila',
+  'event.NOTIFICATION_QUEUED': 'Aviso preparado',
+  'event.NOTIFICATION_FAILED': 'No pudimos entregar el aviso',
   'event.NOTIFICATION_SENT': 'Aviso enviado',
 
   // Tipos de aviso
