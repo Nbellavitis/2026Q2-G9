@@ -39,7 +39,7 @@ import { Stat } from '@/components/Stat'
  * server decides, and the stream delivers the truth.
  */
 export default function QueueBoardPage() {
-  const { t } = useI18n()
+  const { t, tp } = useI18n()
   const queueId = useQueryParam('id')
   const [token, setTokenState] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -175,13 +175,22 @@ export default function QueueBoardPage() {
           {board.lanes.filter((lane) => lane.lane.active).map((lane) => (
             <Card key={lane.lane.id}>
               <div className="flex items-start justify-between gap-3">
-                <div><h2 className="font-display text-lg font-semibold">{lane.lane.name}</h2><p className="text-sm text-muted">{lane.lane.minPartySize}–{lane.lane.maxPartySize ?? '∞'} people · {lane.waitingGroups} waiting · {lane.capacityUsed}/{lane.capacityMaximum ?? '∞'} {lane.lane.capacityMode.toLowerCase()}</p></div>
-                <Button size="sm" onClick={() => callLane(lane.lane.id)} loading={calling} disabled={closed || lane.waiting.length === 0}>Call next</Button>
+                <div><h2 className="font-display text-lg font-semibold">{lane.lane.name}</h2><p className="text-sm text-muted">
+                    {t('lane.range', { min: lane.lane.minPartySize, max: lane.lane.maxPartySize ?? '∞' })}
+                    {' · '}
+                    {tp('lane.waitingCount', lane.waitingGroups)}
+                    {' · '}
+                    {t(lane.lane.capacityMode === 'PERSONS' ? 'lane.capacityPersons' : 'lane.capacityGroups', {
+                      used: lane.capacityUsed,
+                      max: lane.capacityMaximum ?? '∞',
+                    })}
+                  </p></div>
+                <Button size="sm" onClick={() => callLane(lane.lane.id)} loading={calling} disabled={closed || lane.waiting.length === 0}>{t('lane.callNext')}</Button>
               </div>
               <div className="mt-4 space-y-2">
                 {lane.inService.map((entry) => <ServingCard key={entry.id} entry={entry} busy={busyEntry === entry.id} onStatus={(status) => setEntryStatus(entry, status)} />)}
                 {lane.waiting.map((entry) => <WaitingRow key={entry.id} entry={entry} disabled={closed} busy={busyEntry === entry.id} onStatus={(status) => setEntryStatus(entry, status)} />)}
-                {lane.waiting.length === 0 && lane.inService.length === 0 ? <p className="text-sm text-faint">No entries in this lane.</p> : null}
+                {lane.waiting.length === 0 && lane.inService.length === 0 ? <p className="text-sm text-faint">{t('lane.empty')}</p> : null}
               </div>
             </Card>
           ))}

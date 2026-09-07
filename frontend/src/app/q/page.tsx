@@ -76,7 +76,7 @@ export default function JoinQueuePage() {
 
     setFormError(null)
     if (!partySize.trim() || Number(partySize) < 1) {
-      setFormError('Enter a group size of at least 1.')
+      setFormError(t('join.groupSizeRequired'))
       return
     }
     if (!availability?.available) {
