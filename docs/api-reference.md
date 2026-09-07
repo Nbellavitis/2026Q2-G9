@@ -86,6 +86,28 @@ a plain `null` cannot express "unset it":
 { "serviceStations": 3, "clearMaxSize": true, "clearNotifyAtMinutes": true }
 ```
 
+## Lanes (staff)
+
+A queue keeps one QR code but can be segmented into lanes — party-size bands with their own
+priority, capacity and pace. See [domain-model.md](domain-model.md) for the rules.
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| `GET` | `/queues/{queueId}/lanes` | member | Lanes in priority order |
+| `POST` | `/queues/{queueId}/lanes` | owner | → 201 |
+| `PATCH` | `/queues/{queueId}/lanes/{laneId}` | owner | Partial update |
+| `DELETE` | `/queues/{queueId}/lanes/{laneId}` | owner | → 204 |
+
+A lane carries `name`, a party-size band (`minPartySize`, `maxPartySize`, null meaning open-ended),
+`priority` (lower is served first), `capacityMode` (`PERSONS` counts people, `GROUPS` counts
+entries), an optional `maxSize`, a `timeFactor` multiplying the queue's average service time, and
+`active`. Active bands may not overlap: a joining group falls into the first active lane whose band
+contains its size.
+
+Queue-level `callStrategy` decides how lanes are drained — `GLOBAL_AGE` (oldest group first,
+ignoring lanes), `LANE_PRIORITY` (lowest priority number first, oldest within it) or `ROUND_ROBIN`
+(one lane at a time, rotating).
+
 ## Entries (staff)
 
 | Method | Path | Notes |

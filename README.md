@@ -159,7 +159,7 @@ no `export`, no quotes. Both imports are optional, so tests and CI still run on 
 | `q.jwt.ttl` | | `12h` | Access-token lifetime. |
 | `q.estimation.service-time-samples` | | `10` | Recent services averaged into the ETA. |
 | `q.grace.sweep-interval` | | `10s` | How often expired grace periods are swept. |
-| `q.sse.timeout` / `q.sse.heartbeat-interval` | | `30m` / `20s` | |
+| `q.sse.timeout` / `q.sse.heartbeat-interval` | `SSE_TIMEOUT` `SSE_HEARTBEAT` | `5m` / `20s` | Streams are short on purpose: one sticks to the instance that accepted it, so a long-lived stream keeps load unbalanced after a scale-out. The heartbeat must stay under the shortest idle timeout in front of it — CloudFront's origin response timeout is 30s. |
 | `q.notifications.email.enabled` | `NOTIFY_EMAIL_ENABLED` | `false` (`true` in `dev`) | When off, notifications go to the logging transport. |
 | `spring.datasource.url` | `DB_URL` | `jdbc:postgresql://localhost:55432/qdb` | |
 
@@ -199,6 +199,7 @@ database) and `/actuator/health/liveness` (process only).
 | [docs/domain-model.md](docs/domain-model.md) | Entities, the entry state machine, grace policies, estimation and metrics definitions |
 | [docs/api-reference.md](docs/api-reference.md) | Every endpoint, error code and payload, plus the SSE contract |
 | [docs/frontend.md](docs/frontend.md) | Frontend implementation notes and the design language |
+| [docs/HANDOFF.md](docs/HANDOFF.md) | **Session handoff.** Where everything stands, how to run it, the measurements taken, conventions, and the open items. Read this first if you are picking the project up |
 | [docs/gotchas.md](docs/gotchas.md) | **Read before deploying or deleting anything.** Teardown traps, cost, local setup, and the decisions a cleanup would break |
 | [infra/README.md](infra/README.md) | Deployment runbook for AWS, and the demonstration script |
 | [infra/q-stack.yaml](infra/q-stack.yaml) | CloudFormation template — the whole environment, 50 resources |

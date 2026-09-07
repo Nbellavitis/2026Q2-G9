@@ -361,6 +361,39 @@ policies are supported, configured per queue:
 the policy, which is why "keep the place forever" and "keep the place when the timer fires" are both
 expressible.
 
+### 6.4 Lanes and call strategies
+
+A queue keeps a single QR code, but a restaurant does not serve a party of two and a party of eight
+from the same pool of tables. **Lanes** segment one queue into party-size bands, each with its own
+priority, capacity and pace.
+
+A lane carries a band (`minPartySize`..`maxPartySize`), a `priority`, a `capacityMode` — `PERSONS`
+counts people toward `maxSize`, `GROUPS` counts entries — and a `timeFactor` multiplying the queue's
+measured average service time, because a table of eight does not turn over as fast as a table of two.
+Active bands may not overlap; a joining group lands in the first active lane whose band contains its
+size. Migration `V3` puts every pre-existing queue into a single unsegmented lane named `1+`, so
+nothing that existed before behaves differently.
+
+`QueueEntrySelector` decides who is next, and **both the real call and the ETA simulation go through
+it** — so the wait a customer is quoted is produced by the rules that will actually serve them.
+Three strategies:
+
+| Strategy | Chooses |
+|---|---|
+| `GLOBAL_AGE` | The oldest group waiting, lanes ignored. The pre-lane behaviour. |
+| `LANE_PRIORITY` | Lowest lane priority first, oldest within it. |
+| `ROUND_ROBIN` | One lane at a time, rotating over the queue's lanes. |
+
+**The round robin rotates over every active lane, not over the lanes that happen to have someone
+waiting.** The cursor is a persisted index, so it only means anything if the list it indexes is
+stable. Indexing only the occupied lanes made the cursor change meaning whenever a lane emptied: with
+lanes A, B and C, serving A then B leaves the cursor at 2 — "C next" — but once A empties the list is
+two long, the cursor folds back to 0, B is served again and C is skipped. The lane most often empty is
+precisely the one the rotation exists to protect.
+
+`DELETE /queues/{id}` now **archives** rather than destroys: the queue is closed and hidden from
+listings, but its entries, events and notifications survive, so historical metrics stay honest.
+
 ---
 
 ## 7. Concurrency and correctness
@@ -404,6 +437,24 @@ QueueEntry entry = entryRepository.findByIdWithQueue(entryId)…;  // read under
 Reads outside a mutation (`GET /queues/{id}/board`) take the lock only because they may expire grace
 periods. Metrics queries take no lock at all — a count that is a few milliseconds stale is not worth
 serialising a dashboard for.
+
+### 7.4 Reads do not take the write lock
+
+The original design took the pessimistic queue lock on *every* path that might expire a grace period —
+including `TicketService.get`, `publicView` and `getSnapshot`, which are public read endpoints that
+almost never write.
+
+That was wrong in three separate ways. Every customer opening their ticket serialised behind the lock
+staff need to operate the line. `SELECT … FOR UPDATE` assigns a transaction id and writes the row
+header, so those reads cost WAL and dirty pages like writes. And a transaction blocked on the lock
+still holds its pool connection, so one busy queue could starve an instance for every other queue.
+
+`GraceService.expireDueIfAny` now **asks before it locks**, over `ix_entry_grace`, and takes the lock
+only when something is actually due — which is rare, because the background sweep already keeps the
+line moving. `getSnapshot` also authorises before expiring, so a non-member cannot cause work.
+
+The correctness argument is unchanged: expiry still happens under the lock. Only the *decision* that
+there is nothing to expire is now lock-free.
 
 ---
 
@@ -845,6 +896,28 @@ Two smaller items remain:
 
 Neither touches business logic, which is the point of having isolated them behind seams.
 
+### 14.5 Container image, and the metric autoscaling needs
+
+The API ships as a container: a multi-stage build leaving the JDK, Maven and sources behind, with the
+jar exploded into layers on a JRE base and running as a non-root user. Tests are skipped inside the
+build because Testcontainers needs a Docker daemon the build does not have — `mvn test` runs outside
+it. `.dockerignore` keeps `.env` out of the image, so the same image runs locally and on an instance
+with configuration supplied at run time.
+
+On EC2 systemd starts the container (`backend/queue-container.service`), and the image moves by
+`docker save` / `docker load` rather than through a registry — one fewer service to justify, and no
+credentials on the instance.
+
+Configuration also comes from a `.env` file read natively through `spring.config.import`, with
+`/etc/queue/queue.env` read the same way on a deployed instance. Both imports are optional, so tests
+and CI still run on the defaults.
+
+**`q.sse.connections`** is exported on `/actuator/metrics`, tagged by audience. It is the number of
+open streams an instance is holding — and per §16, that is the resource this system actually runs out
+of, not database throughput. It is therefore the metric any autoscaling policy has to be calibrated
+against. Actuator exposure is `health,info,metrics`, and `SecurityConfig` leaves only health and info
+public, so reading it needs a staff token.
+
 ---
 
 ## 15. Decision log
@@ -867,7 +940,12 @@ Neither touches business logic, which is the point of having isolated them behin
 | 13 | Read models reused as responses | A second DTO layer | The entity boundary is already enforced; a mirror record would only drift | Documented as intentional |
 | 14 | Real PostgreSQL in tests | H2 in-memory | Locks, CHECK constraints and migrations are the parts worth testing | Docker required to run the suite |
 | 14b | Multi-AZ RDS, single writer, no read replicas | Single-AZ; read replicas; Aurora | Multi-AZ is bought for *maintenance*, not disasters: on single-AZ, AWS patching is downtime, and demand here is spiky and synchronised across every establishment. Replicas were rejected on product grounds, not cost — replication is asynchronous and Q displays a live position, so a stale read is a visible correctness bug, not a slow one | Doubles the database cost and adds minutes to stack creation; buys availability and no extra capacity |
-| 15 | Injected `Clock` everywhere | `Instant.now()` | Makes grace periods, metrics windows and token expiry testable without sleeping | Includes JWT validation |
+| 17 | Lanes segment a queue, one QR code | Separate queues per party size; no segmentation | A restaurant does not serve parties of two and eight from one pool of tables, but customers should still scan one code | Overlapping bands must be rejected; every legacy queue migrates into a `1+` lane |
+| 18 | Round robin rotates over all active lanes | Rotate only over lanes with someone waiting | A persisted cursor is an index; indexing a list that changes length makes it mean something different each call, and it starves exactly the lane the rotation protects | Empty lanes are visited and skipped, which is cheap |
+| 19 | Reads ask before they lock | Keep the write lock on every path that might expire | Public reads serialised behind the lock staff need, cost WAL like writes, and held pool connections while blocked | Expiry still happens under the lock; only the "nothing to do" decision is lock-free |
+| 20 | `DELETE /queues/{id}` archives | Hard delete | Destroying a queue destroys the history its metrics are computed from | Archived queues are hidden, not gone; storage grows |
+| 21 | Ship the API as a container, moved by `docker save` | Jar under systemd; a registry (ECR) | One artifact that runs identically everywhere, without adding a registry service to justify or credentials on the instance | The CloudFormation user-data still installs a jar — see gotchas |
+| 15 | Injected `Clock` everywhere || 15 | Injected `Clock` everywhere | `Instant.now()` | Makes grace periods, metrics windows and token expiry testable without sleeping | Includes JWT validation |
 | 16 | English throughout | Spanish UI with English code | One language across code, API and interface avoids a translation seam mid-stack | Notification copy is English |
 
 ---

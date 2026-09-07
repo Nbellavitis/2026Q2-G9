@@ -69,6 +69,12 @@ is opaque: `/var/log/q-bootstrap.log` sits on a machine you cannot reach. Until 
 recovery is delete-and-redeploy — or three lines of user-data copying that log to the artifacts
 bucket. Deliberate MVP simplification, not an oversight.
 
+**The infrastructure and the application disagree about how the API ships.** `infra/q-stack.yaml`
+user-data downloads a jar and runs it under systemd; the backend now builds a container image started
+by `backend/queue-container.service`. Both work, but the CloudFormation template has not been updated
+for the container. Before deploying, pick one — either point user-data at `docker load` and the unit
+file, or keep shipping the jar and treat the image as a local convenience.
+
 **`LabInstanceProfile` is Learner Lab specific.** The template references it rather than creating an
 IAM role, because AWS Academy does not permit creating one. In a normal account, create a role with
 S3 read access and swap the name.
@@ -97,7 +103,9 @@ demo data you must truncate first:
 docker exec q-postgres psql -U q -d qdb -c "TRUNCATE TABLE notification_record, queue_event, queue_entry, service_queue, membership, establishment, user_account RESTART IDENTITY CASCADE;"
 ```
 
-**Tests need Docker running.** The integration tests use Testcontainers against a real PostgreSQL,
+**Tests need Docker running** — and Docker Desktop quitting is a real failure mode here: it shows up
+as ~57 context-load errors that look like a code break but say `Could not find a valid Docker
+environment`. Start it with `open -a Docker` and re-run. **Tests need Docker running.** The integration tests use Testcontainers against a real PostgreSQL,
 deliberately — the pessimistic locks, the CHECK constraints and the Flyway migration are precisely
 the parts an in-memory database would fake.
 
@@ -136,6 +144,11 @@ Each of these is a deliberate decision that a well-meaning cleanup would break.
 | The notification listener does almost nothing | On purpose. Its thread must keep reading the database connection; doing the refresh there serialised every queue on the instance behind every other, and one customer on a bad connection could block `SseEmitter.send` and stall them all. Work belongs on `BroadcastCoordinator`'s virtual threads |
 | The broadcast payload carries no `revision` or version | It does not need one. `BroadcastCoordinator` keeps at most one refresh per queue in flight, so an older view cannot be published after a newer one. Remove that serialisation and you *do* need a counter — pick one, not both |
 | `readBroadcast` looks like it does too much in one method | It deliberately assembles the whole fan-out in one pass. Rebuilding each subscriber's view independently made database load grow with the number of people watching — 12 watchers cost 66 statements instead of 19. Splitting it back up reintroduces that |
+| Lane bands look like they could overlap | They may not, and it is enforced: a joining group falls into the *first* active lane whose band contains its size, so overlapping bands would make placement ambiguous |
+| The round robin visits lanes that are empty | Deliberately. The cursor is a persisted index; rotating only over occupied lanes makes it mean something different on every call and starves the lane it exists to protect |
+| `DELETE /queues/{id}` does not delete | It archives — closed, hidden from listings, entries and events kept. Destroying a queue would destroy the history its metrics are computed from |
+| `V3` made `party_size` NOT NULL | Rows that had no party size became `1`. If a queue never asked for party size, its history now reads as parties of one |
+| `.env` looks like a shell file | It is `.properties` syntax, read natively by `spring.config.import`. No `export`, no quotes — a quoted value keeps its quotes |
 | Positions are computed on every read | A stored position can disagree with the line. The `WAITING` list sorted by order key *is* the line |
 | Notification uniqueness includes a `cycle` column | Without it, a customer called, missed, requeued and called again would never get the second "it's your turn" |
 | Grace expiry runs in two places | Lazily on read so a client never sees a call the clock invalidated, and on a timer so a queue nobody is watching still moves |
