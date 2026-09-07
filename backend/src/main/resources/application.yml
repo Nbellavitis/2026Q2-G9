@@ -135,8 +135,18 @@ q:
   grace:
     sweep-interval: 10s
   sse:
-    timeout: 30m
-    heartbeat-interval: 20s
+    # How long a stream lives before the client is asked to reconnect.
+    #
+    # Short on purpose. A Server-Sent Events stream is long-lived and sticks to the instance that
+    # accepted it, so the load balancer only ever spreads NEW connections: an instance that filled up
+    # gets no relief when the Auto Scaling Group adds capacity. Expiry is the only thing that moves
+    # anyone, because a reconnect is routed afresh. At thirty minutes an uneven spread took half an
+    # hour to correct; at five it corrects six times faster, and the client reconnects on its own.
+    timeout: ${SSE_TIMEOUT:5m}
+    # Keeps intermediaries from reaping an idle stream, and is how a dead client is noticed.
+    # Must stay comfortably under the shortest idle timeout in front of it - CloudFront's origin
+    # response timeout is 30s.
+    heartbeat-interval: ${SSE_HEARTBEAT:20s}
   notifications:
     email:
       enabled: ${NOTIFY_EMAIL_ENABLED:false}
