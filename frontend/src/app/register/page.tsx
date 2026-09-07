@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState, type FormEvent } from 'react'
 import { ApiError } from '@/lib/api'
+import { errorMessage } from '@/lib/format'
 import { useAuth } from '@/lib/auth'
 import { useI18n } from '@/lib/i18n'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
@@ -41,7 +42,7 @@ export default function RegisterPage() {
       })
       router.replace('/panel')
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : 'Something went wrong.')
+      setError(errorMessage(t, cause))
       setSubmitting(false)
     }
   }

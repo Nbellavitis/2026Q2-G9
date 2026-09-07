@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { ApiError, api } from '@/lib/api'
+import { errorMessage } from '@/lib/format'
 import { useAuth } from '@/lib/auth'
 import { useI18n, type Translate } from '@/lib/i18n'
 import { useQueryParam } from '@/lib/usePathSegment'
@@ -61,7 +62,7 @@ export default function QueueSettingsPage() {
           notifyAtMinutes: loaded.notifyAtMinutes === undefined ? '' : String(loaded.notifyAtMinutes),
         })
       },
-      (cause: unknown) => setError(cause instanceof ApiError ? cause.message : t('common.somethingWrong')),
+      (cause: unknown) => setError(errorMessage(t, cause)),
     )
   }, [queueId, t])
 
@@ -95,7 +96,7 @@ export default function QueueSettingsPage() {
       setQueue(updated)
       setSaved(true)
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : t('common.somethingWrong'))
+      setError(errorMessage(t, cause))
     } finally {
       setSaving(false)
     }
@@ -107,7 +108,7 @@ export default function QueueSettingsPage() {
       await api.queues.remove(queueId)
       router.replace('/panel')
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : t('common.somethingWrong'))
+      setError(errorMessage(t, cause))
       setConfirmDelete(false)
     }
   }
@@ -125,7 +126,7 @@ export default function QueueSettingsPage() {
       await api.queues.createLane(queueId, { name: laneDraft.name.trim(), minPartySize: Number(laneDraft.minPartySize), maxPartySize: laneDraft.maxPartySize ? Number(laneDraft.maxPartySize) : null, priority: Number(laneDraft.priority), capacityMode: laneDraft.capacityMode, maxSize: laneDraft.maxSize ? Number(laneDraft.maxSize) : null, timeFactor: Number(laneDraft.timeFactor), active: true })
       setLaneDraft({ ...laneDraft, name: '' }); await refreshLanes()
       setLaneFeedback({ kind: 'info', message: t('lanes.added') })
-    } catch (cause) { setLaneFeedback({ kind: 'error', message: cause instanceof ApiError ? cause.message : t('lanes.addFailed') }) } finally { setLaneBusy(false) }
+    } catch (cause) { setLaneFeedback({ kind: 'error', message: errorMessage(t, cause) }) } finally { setLaneBusy(false) }
   }
 
   const toggleLane = async (lane: QueueLaneView) => {
@@ -135,14 +136,14 @@ export default function QueueSettingsPage() {
       await api.queues.updateLane(queueId, lane.id, { name: lane.name, minPartySize: lane.minPartySize, maxPartySize: lane.maxPartySize ?? null, priority: lane.priority, capacityMode: lane.capacityMode, maxSize: lane.maxSize ?? null, timeFactor: lane.timeFactor, active: !lane.active })
       await refreshLanes()
       setLaneFeedback({ kind: 'info', message: t('lanes.toggled', { name: lane.name, state: lane.active ? t('lanes.stateOff') : t('lanes.stateOn') }) })
-    } catch (cause) { setLaneFeedback({ kind: 'error', message: cause instanceof ApiError ? cause.message : t('lanes.toggleFailed') }) } finally { setLaneBusy(false) }
+    } catch (cause) { setLaneFeedback({ kind: 'error', message: errorMessage(t, cause) }) } finally { setLaneBusy(false) }
   }
 
   const deleteLane = async (lane: QueueLaneView) => {
     if (!queueId) return
     setLaneBusy(true); setError(null); setLaneFeedback(null)
     try { await api.queues.removeLane(queueId, lane.id); await refreshLanes(); setLaneFeedback({ kind: 'info', message: t('lanes.deleted', { name: lane.name }) }) }
-    catch (cause) { setLaneFeedback({ kind: 'error', message: cause instanceof ApiError ? cause.message : t('lanes.deleteFailed') }) } finally { setLaneBusy(false) }
+    catch (cause) { setLaneFeedback({ kind: 'error', message: errorMessage(t, cause) }) } finally { setLaneBusy(false) }
   }
 
   if (queueId === null) return <Alert kind="error">{t('board.noQueueSelected')}</Alert>

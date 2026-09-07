@@ -1,3 +1,4 @@
+import { ApiError } from '@/lib/api'
 import type { Translate } from './i18n'
 import type { EntryStatus, EventType, NotificationType, QueueStatus } from './types'
 
@@ -122,4 +123,22 @@ export function notificationLabel(t: Translate, type: NotificationType): string 
 /** Joins class names, dropping anything falsy. */
 export function cx(...values: Array<string | false | null | undefined>): string {
   return values.filter(Boolean).join(' ')
+}
+
+/**
+ * What to show a person when a request fails.
+ *
+ * <p>The API answers with an RFC 7807 problem whose `detail` is written in English, and showing that
+ * straight through is how English leaked into a Spanish page. The code is stable and language-free, so
+ * it is what we translate. An unmapped code falls back to the server's own sentence rather than to a
+ * generic apology: a specific message in the wrong language still helps more than a vague one.
+ */
+export function errorMessage(t: Translate, cause: unknown): string {
+  if (cause instanceof ApiError) {
+    const key = `error.${cause.code}` as never
+    const translated = t(key)
+    if (translated !== key) return translated
+    return cause.message || t('error.GENERIC' as never)
+  }
+  return t('error.GENERIC' as never)
 }

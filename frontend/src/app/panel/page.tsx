@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ApiError, api } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useI18n } from '@/lib/i18n'
-import { formatMinutes, formatPercent, formatWaitNeutral, queueStatusLabel, queueStatusTone } from '@/lib/format'
+import { formatMinutes, formatPercent, formatWaitNeutral, queueStatusLabel, queueStatusTone, errorMessage } from '@/lib/format'
 import type { MetricsView, QueueSnapshot, QueueView } from '@/lib/types'
 import { Alert } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'
@@ -37,7 +37,7 @@ export default function PanelHomePage() {
       setQueues(list)
       setError(null)
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : t('common.somethingWrong'))
+      setError(errorMessage(t, cause))
       setQueues([])
     }
   }, [establishmentId, t])
@@ -225,7 +225,7 @@ function CreateQueueForm({
       })
       onCreated(created)
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : t('common.somethingWrong'))
+      setError(errorMessage(t, cause))
       setSubmitting(false)
     }
   }

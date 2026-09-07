@@ -14,6 +14,7 @@ import {
   formatWaitNeutral,
   queueStatusLabel,
   queueStatusTone,
+  errorMessage,
 } from '@/lib/format'
 import { useI18n } from '@/lib/i18n'
 import { getToken } from '@/lib/session'
@@ -74,7 +75,7 @@ export default function QueueBoardPage() {
       await task()
       refresh()
     } catch (cause) {
-      setActionError(cause instanceof ApiError ? cause.message : t('common.somethingWrong'))
+      setActionError(errorMessage(t, cause))
     } finally {
       setBusyEntry(null)
       setCalling(false)

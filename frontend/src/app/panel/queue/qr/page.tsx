@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { ApiError, api } from '@/lib/api'
+import { errorMessage } from '@/lib/format'
 import { useI18n } from '@/lib/i18n'
 import { useQueryParam } from '@/lib/usePathSegment'
 import type { QueueView } from '@/lib/types'
@@ -26,7 +27,7 @@ export default function QueueQrPage() {
   useEffect(() => {
     if (!queueId) return
     api.queues.get(queueId).then(setQueue, (cause: unknown) =>
-      setError(cause instanceof ApiError ? cause.message : t('common.somethingWrong')),
+      setError(errorMessage(t, cause)),
     )
   }, [queueId, t])
 

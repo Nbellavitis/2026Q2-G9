@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react'
 import { ApiError, api } from '@/lib/api'
-import { cx } from '@/lib/format'
+import { cx, errorMessage } from '@/lib/format'
 import { useI18n } from '@/lib/i18n'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
 import { usePathSegment } from '@/lib/usePathSegment'
@@ -46,9 +46,7 @@ export default function JoinQueuePage() {
         setLoadError(
           cause instanceof ApiError && cause.status === 404
             ? t('join.queueGone')
-            : cause instanceof ApiError
-              ? cause.message
-              : t('common.somethingWrong'),
+            : errorMessage(t, cause),
         )
       })
     return () => controller.abort()
@@ -63,7 +61,7 @@ export default function JoinQueuePage() {
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
       api.publicApi.availability(queueId, size, controller.signal).then(setAvailability, (cause: unknown) => {
-        if (!controller.signal.aborted) setFormError(cause instanceof ApiError ? cause.message : 'Could not check availability.')
+        if (!controller.signal.aborted) setFormError(errorMessage(t, cause))
       })
     }, 300)
     return () => {
@@ -97,7 +95,7 @@ export default function JoinQueuePage() {
       // A full navigation, not a client-side push: `/t/{token}` is its own exported shell.
       window.location.href = `/t/${ticket.ticketToken}/`
     } catch (cause) {
-      setFormError(cause instanceof ApiError ? cause.message : t('common.somethingWrong'))
+      setFormError(errorMessage(t, cause))
       setSubmitting(false)
     }
   }
