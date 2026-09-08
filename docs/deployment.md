@@ -58,8 +58,8 @@ obviously an improvement on this particular deployment target.
 
 | | How it works | Boot time | Use it when |
 |---|---|---|---|
-| **Jar baked into the AMI** | jar and systemd unit are already in the image | Fastest — nothing is downloaded | **Default. Start here.** |
-| Jar pulled from S3 at boot | user-data polls the bucket, then starts systemd | ~1 min, and boot can fail if the object is missing | You redeploy often and do not want to rebake |
+| Jar baked into the AMI | jar and systemd unit are already in the image | Fastest — nothing is downloaded | The version changes rarely |
+| **Jar pulled from S3 at boot** | a fetch unit polls the bucket, then systemd starts the app | ~1 min, and boot fails if the object is missing | **This deployment.** A new version is an upload, not a rebake |
 | Docker image via S3 | `docker save` / `docker load` as above | Slowest — daemon install plus ~100 MB | You want one artifact that runs identically everywhere |
 
 Note that once you bake the AMI, the jar-versus-Docker question largely dissolves: nothing is
@@ -67,7 +67,21 @@ downloaded at boot either way, and Docker becomes merely how the application is 
 the image. If you want to use the container, bake an AMI that already has Docker installed and the
 image already loaded, and have systemd run `docker run` instead of `java -jar`.
 
-The rest of this document takes the first option.
+**This document takes the second option: the jar lives in S3 and the instance fetches it at boot.**
+The AMI holds the runtime and the systemd units; it does not hold the application or its secrets.
+That buys three things worth having:
+
+* **A new version is an upload plus an instance refresh** — no rebaking, no launch template edit.
+* **No credentials in the image.** `queue.env` is fetched from a private bucket at boot rather than
+  frozen into a snapshot that is easy to share by accident.
+* **Step 10 stops being a rebake.** `PUBLIC_BASE_URL` and `CORS_ORIGINS` only exist once CloudFront
+  does, and with this approach that is a re-upload and a restart rather than a second AMI.
+
+And one thing worth knowing before you rely on it: **a missing or corrupt object in the bucket fails
+every instance the group launches, including the replacements it launches to recover.** Baking is
+more brittle to change; fetching is more brittle to a bad upload. The fetch unit below polls rather
+than failing immediately, which covers the ordinary case of an instance booting before the upload
+finished — but it cannot save you from publishing a jar that does not start.
 
 ---
 
@@ -78,16 +92,17 @@ Each step needs the one before it, so this order avoids going back:
 1. **Network** — VPC, six subnets, Internet Gateway, NAT, route tables, S3 Gateway Endpoint
 2. **Security groups** — `sg-alb`, `sg-app`, `sg-rds`, chained
 3. **RDS** — PostgreSQL, Multi-AZ, isolated subnets, not publicly accessible
-4. **Build the artifacts** locally
+4. **Build and publish the artifacts** — the artifacts bucket, the jar, `app.env`
 5. **The golden instance** — one EC2, configured by hand
 6. **Bake the AMI**
 7. **Target group and load balancer**
 8. **Launch template and Auto Scaling Group**
 9. **Frontend** — S3 and CloudFront
-10. **Rebake** — `PUBLIC_BASE_URL` and `CORS_ORIGINS` only exist once CloudFront does
+10. **Re-publish** — `PUBLIC_BASE_URL` and `CORS_ORIGINS` only exist once CloudFront does
 
-**Plan on baking the AMI twice.** Step 10 is not a mistake in the plan; it is a consequence of the
-application needing to know its own public address, which does not exist until step 9.
+Step 10 is not a mistake in the plan; it is a consequence of the application needing to know its own
+public address, which does not exist until step 9. Because the configuration is fetched from S3
+rather than baked in, that step is a re-upload rather than a second AMI.
 
 ---
 
@@ -151,7 +166,7 @@ max_instances x (DB_POOL_MAX + 1)  <=  80% of max_connections
 With a pool of 10 that puts the safe ceiling at 8 instances. Raising the group's maximum without
 raising the database class will exhaust it.
 
-## 4. Build the artifacts
+## 4. Build and publish the artifacts
 
 ```bash
 cd backend && mvn clean package
@@ -164,6 +179,35 @@ cd frontend && NEXT_PUBLIC_API_URL=https://<cloudfront-domain>/api/v1 npm run bu
 `backend/target/queue-api-0.1.0-SNAPSHOT.jar` and `frontend/out/` are everything that gets deployed.
 The frontend build needs the CloudFront domain, so on the first pass either build it after step 9 or
 rebuild it then.
+
+### The artifacts bucket
+
+Create a **private** bucket — `q-artifacts-<account>-<region>` — with Block Public Access fully on
+and default encryption enabled. It holds two objects, and one of them is secret:
+
+| Object | What it is |
+|---|---|
+| `queue-api.jar` | The application |
+| `app.env` | The contents of `queue.env` from step 5, including the database password, the JWT secret and the Gmail App Password |
+
+This is a different bucket from the one serving the frontend. Do not reuse that one: it is read by
+CloudFront and exists to be public.
+
+```bash
+aws s3 cp backend/target/queue-api-0.1.0-SNAPSHOT.jar s3://q-artifacts-<account>-<region>/queue-api.jar
+aws s3 cp app.env s3://q-artifacts-<account>-<region>/app.env
+```
+
+Two things have to be true for an instance in a private subnet to read this:
+
+* **The S3 Gateway Endpoint from step 1 must be associated with the application route table.** Without
+  it the download still works, but it goes out through the NAT Gateway and is billed per GB.
+* **The instance needs an instance profile granting S3 read.** In the AWS Academy Learner Lab, attach
+  the provided `LabInstanceProfile` — that environment does not allow creating roles. Outside it, a
+  role with read access to this bucket only.
+
+There is no credential on the instance for this: the instance profile is what authenticates the
+`aws s3 cp`, which is the reason the secrets can live in a bucket instead of in the image.
 
 ## 5. The golden instance
 
@@ -181,14 +225,22 @@ sudo dnf install -y java-25-amazon-corretto-headless
 ```bash
 sudo useradd --system --no-create-home --shell /sbin/nologin queue
 sudo mkdir -p /opt/queue /etc/queue
+sudo chown queue:queue /opt/queue
 ```
 
-Copy the jar up with `scp`, then:
+**Do not copy the jar up with `scp`.** It comes from the bucket, and it has to come from the bucket
+on every instance the group ever launches — including the ones that launch at 19:45 on a Friday with
+nobody watching. What you are building here is the machine that knows how to fetch it.
+
+Confirm the instance can actually reach the bucket before going further, because this is the step
+that fails silently otherwise:
 
 ```bash
-sudo mv queue-api-0.1.0-SNAPSHOT.jar /opt/queue/queue-api.jar
-sudo chown -R queue:queue /opt/queue
+aws s3 ls s3://q-artifacts-<account>-<region>/
 ```
+
+An `Unable to locate credentials` means no instance profile is attached. A hang means the S3 Gateway
+Endpoint is missing and there is no NAT route either.
 
 ### Configuration
 
@@ -198,6 +250,10 @@ or not systemd also passes them in. It is the same file as the `.env` used local
 values. `backend/.env.example` is the annotated template and is close to authoritative on variable
 names — with one exception: it lists `JWT_TTL`, which nothing reads. The token lifetime is fixed at
 12h in `application.yml`, so setting that variable has no effect.
+
+**Write this file on your own machine as `app.env` and upload it to the artifacts bucket** (step 4).
+Do not hand-write it on the golden instance: it would be baked into the AMI, and then every instance
+in the group would carry a snapshot of your credentials that no longer matches the bucket.
 
 ```
 PORT=8080
@@ -225,9 +281,8 @@ MAIL_USERNAME=<your gmail address>
 MAIL_PASSWORD=<16-character app password>
 ```
 
-```bash
-sudo chown root:queue /etc/queue/queue.env && sudo chmod 640 /etc/queue/queue.env
-```
+The fetch unit below is what puts this file on the instance and sets its permissions, so there is
+nothing to `chmod` by hand.
 
 Four things worth getting right rather than discovering later:
 
@@ -240,6 +295,52 @@ Four things worth getting right rather than discovering later:
 * **`MAIL_PASSWORD` is a Gmail App Password, not the account password.** It needs 2FA enabled on the
   account, and it is 16 characters with no spaces.
 
+### Fetching the artifacts at boot
+
+`/usr/local/bin/queue-fetch`, `chmod 755`:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+BUCKET=q-artifacts-<account>-<region>
+REGION=<region>
+
+# Poll rather than assume. An instance can boot before the upload has finished - during the first
+# build, or when the group replaces an instance while you are mid-deploy - and a download that is
+# merely early should not become a failed boot.
+for attempt in $(seq 1 60); do
+  if aws s3 cp "s3://$BUCKET/app.env" /etc/queue/queue.env --region "$REGION"      && aws s3 cp "s3://$BUCKET/queue-api.jar" /opt/queue/queue-api.jar --region "$REGION"; then
+    chown root:queue /etc/queue/queue.env && chmod 640 /etc/queue/queue.env
+    chown queue:queue /opt/queue/queue-api.jar && chmod 640 /opt/queue/queue-api.jar
+    echo "artifacts retrieved on attempt $attempt"
+    exit 0
+  fi
+  echo "artifacts not ready (attempt $attempt), waiting"
+  sleep 15
+done
+
+echo "giving up after fifteen minutes" >&2
+exit 1
+```
+
+`/etc/systemd/system/queue-fetch.service`:
+
+```
+[Unit]
+Description=Fetch Queue artifacts from S3
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/queue-fetch
+
+[Install]
+WantedBy=multi-user.target
+```
+
 ### The service
 
 `/etc/systemd/system/queue.service`:
@@ -247,8 +348,11 @@ Four things worth getting right rather than discovering later:
 ```
 [Unit]
 Description=Queue API
-After=network-online.target
+After=network-online.target queue-fetch.service
 Wants=network-online.target
+# Requires, not Wants: without the jar and the environment file there is nothing to start, and a
+# failed fetch should surface as a failed unit rather than as a Java stack trace.
+Requires=queue-fetch.service
 
 [Service]
 Type=simple
@@ -268,11 +372,13 @@ WantedBy=multi-user.target
 ```
 
 ```bash
-sudo systemctl daemon-reload && sudo systemctl enable --now queue
+sudo systemctl daemon-reload && sudo systemctl enable --now queue-fetch queue
 ```
 
-`enable` is the part that matters for the AMI: it is what makes an instance the group launches come
-up serving without anyone logging in.
+`enable` on **both** is the part that matters for the AMI: it is what makes an instance the group
+launches fetch its artifacts and come up serving without anyone logging in. Forgetting it on
+`queue-fetch` produces the worst version of this failure — the golden instance works, because you
+ran the fetch by hand, and every instance the group launches afterwards does not.
 
 ```bash
 curl -s localhost:8080/actuator/health/readiness && sudo journalctl -u queue -n 40 --no-pager
@@ -298,8 +404,20 @@ want the real instance id in the header.
 **Actions → Image and templates → Create image.** Leave the instance running; the snapshot is
 consistent enough for a stateless application.
 
-The RDS endpoint and every credential are baked into the image. Rebuilding the database means
-rebaking the AMI.
+Be clear about what this image does and does not contain:
+
+| In the image | Not in the image |
+|---|---|
+| Java 25 | The jar |
+| The `queue-fetch` script and both systemd units | `queue.env`, and therefore every credential |
+| The bucket name and region, hard-coded in the script | The RDS endpoint, which lives in `queue.env` |
+
+That split is the point. Changing the application, the database endpoint or any secret is an upload
+to the bucket; only changing the *runtime* — a new Java version, a change to the units — needs a new
+AMI.
+
+The bucket name and region are the one deployment detail frozen into the snapshot. Moving to a
+different bucket means rebaking, so pick the name before this step.
 
 ## 7. Target group and load balancer
 
@@ -325,6 +443,12 @@ Then an internet-facing ALB across `public-a` and `public-b`, with `sg-alb`, for
 
 Launch template: the AMI just baked, `t3.small`, `sg-app`, **no user data** — systemd already handles
 startup.
+
+**Set the IAM instance profile on the launch template** (`LabInstanceProfile` in the Learner Lab).
+This is the single easiest thing to miss and the most confusing to diagnose: the golden instance had
+a profile attached directly, so it fetched fine and baked fine, but an AMI does not carry one. Every
+instance the group launches would come up, fail `queue-fetch` with a credentials error, and never
+join the target group.
 
 | | |
 |---|---|
@@ -422,13 +546,18 @@ the id in the URL cannot be known at build time. Without them S3 returns `NoSuch
 Cache policy: **disabled** for the `/api/*` behaviour. Caching an API response here would serve one
 customer's ticket to another.
 
-## 10. Rebake with the real URLs
+## 10. Re-publish with the real URLs
 
-`PUBLIC_BASE_URL` and `CORS_ORIGINS` now have real values. Update `/etc/queue/queue.env` on the
-golden instance, restart, verify, bake a second AMI, point the launch template at it, and run an
-**instance refresh** on the group.
+`PUBLIC_BASE_URL` and `CORS_ORIGINS` now have real values. This is where fetching from S3 pays for
+itself — there is no second AMI:
 
-Rebuild the frontend too, now that `NEXT_PUBLIC_API_URL` is known.
+```bash
+aws s3 cp app.env s3://q-artifacts-<account>-<region>/app.env
+```
+
+Then run an **instance refresh** on the group. Each replacement fetches the updated file at boot.
+
+Rebuild and re-upload the frontend too, now that `NEXT_PUBLIC_API_URL` is known.
 
 ---
 
@@ -470,12 +599,26 @@ address from outside must fail; only the bastion can reach it.
 cd backend && mvn clean package
 ```
 
-Copy the jar to the golden instance, `sudo systemctl restart queue`, verify, bake a new AMI, point
-the launch template at the new version, and use **instance refresh** to roll the group over.
+```bash
+aws s3 cp backend/target/queue-api-0.1.0-SNAPSHOT.jar s3://q-artifacts-<account>-<region>/queue-api.jar
+```
+
+Then **instance refresh** on the group. That is the whole procedure: no AMI, no launch template edit.
+Each new instance fetches the new jar at boot, and the refresh replaces the old ones a fraction at a
+time so the service stays up.
+
+Two things to know about this:
+
+* **Running instances do not pick up a new jar on their own.** They fetch once, at boot. Until the
+  refresh replaces them they keep serving the old version, which is what you want — but it means
+  uploading alone deploys nothing.
+* **Roll back by re-uploading the previous jar and refreshing again.** Keep the last known-good one;
+  enabling versioning on the bucket is the cheap way to make that automatic.
 
 Every instance runs Flyway at startup. That is safe with several starting at once — Flyway takes a
 lock and the rest find the migrations already applied — but it does mean a bad migration fails the
-whole group's boot. Test migrations before baking.
+whole group's boot, and with the jar coming from S3 it fails the *replacements* too. Test migrations
+before uploading.
 
 ## Troubleshooting
 
@@ -484,7 +627,11 @@ whole group's boot. Test migrations before baking.
 | Targets never healthy | Check the health check path is `/actuator/health/readiness`; then `journalctl -u queue` on the golden instance |
 | `502` from CloudFront | The application is not up yet, or the target group has no healthy targets |
 | `404` on `/q/<id>` | The CloudFront rewrites for `/q/*` and `/t/*` are missing |
-| Live updates work on one browser but not across two | The `NOTIFY` channel is not connected — look for `Queue-change channel open` in the log |
+| Live updates work on one browser but not across two | The `NOTIFY` channel is not connected — look for `Listening for 'queue_changed'` in the log |
 | `FATAL: sorry, too many clients already` | `max_instances x (DB_POOL_MAX + 1)` exceeded the database ceiling; see step 3 |
 | Emails silently never arrive | `MAIL_PASSWORD` is the account password rather than a 16-character App Password |
 | Instances replaced in a loop | Health check type is ELB rather than EC2; see step 8 |
+| Golden instance works, new instances never start | `queue-fetch` was not `systemctl enable`d, so only the manual run ever happened |
+| `queue-fetch` fails with `Unable to locate credentials` | No instance profile on the launch template — the AMI does not carry one |
+| `queue-fetch` retries for fifteen minutes then fails | Wrong bucket or key name, or the S3 Gateway Endpoint is not on the application route table |
+| New version uploaded but nothing changed | Instances fetch at boot only; run an instance refresh |
