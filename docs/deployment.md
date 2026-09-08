@@ -173,8 +173,11 @@ cd backend && mvn clean package
 ```
 
 ```bash
-cd frontend && NEXT_PUBLIC_API_URL=https://<cloudfront-domain>/api/v1 npm run build
+cd frontend && NEXT_PUBLIC_API_URL=https://<cloudfront-domain> npm run build
 ```
+
+`NEXT_PUBLIC_API_URL` is the **origin only** — no path. `src/lib/api.ts` appends `/api/v1` itself, so
+including it here produces `/api/v1/api/v1` and every call 404s.
 
 `backend/target/queue-api-0.1.0-SNAPSHOT.jar` and `frontend/out/` are everything that gets deployed.
 The frontend build needs the CloudFront domain, so on the first pass either build it after step 9 or
