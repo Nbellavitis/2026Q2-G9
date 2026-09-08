@@ -78,14 +78,19 @@ public record AppProperties(
     public record Seed(@DefaultValue("false") boolean enabled) {
     }
 
+    // Both public links carry their id in the query string rather than the path. A path would read
+    // better, but it would need one rewrite rule per shell in whatever serves the exported site, and
+    // static hosting on S3 cannot express that - only a CDN in front of it can. The query string
+    // costs nothing to serve and keeps the deployment to a bucket.
+
     /** Link a customer follows to watch their own place in the line. */
     public String ticketUrl(Object ticketToken) {
-        return "%s/t/%s".formatted(trimmedBaseUrl(), ticketToken);
+        return "%s/t/?token=%s".formatted(trimmedBaseUrl(), ticketToken);
     }
 
     /** Link a QR code encodes: the public landing page of a queue. */
     public String joinUrl(Object queueId) {
-        return "%s/q/%s".formatted(trimmedBaseUrl(), queueId);
+        return "%s/q/?id=%s".formatted(trimmedBaseUrl(), queueId);
     }
 
     private String trimmedBaseUrl() {

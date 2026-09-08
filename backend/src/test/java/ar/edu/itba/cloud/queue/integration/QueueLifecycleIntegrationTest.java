@@ -44,7 +44,7 @@ class QueueLifecycleIntegrationTest extends AbstractIntegrationTest {
         assertThat(brunoTicket.get("globalWaitingGroupsAhead").asInt()).isEqualTo(1);
         assertThat(brunoTicket.get("estimatedWaitMinutes").asInt()).isEqualTo(10);
         assertThat(brunoTicket.get("ticketUrl").asText())
-                .isEqualTo("http://localhost:3000/t/" + ticketToken(bruno));
+                .isEqualTo("http://localhost:3000/t/?token=" + ticketToken(bruno));
 
         JsonNode initialBoard = board(owner, queueId);
         assertThat(initialBoard.get("waitingCount").asInt()).isEqualTo(3);

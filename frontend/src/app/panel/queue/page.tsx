@@ -19,7 +19,7 @@ import {
 import { useI18n } from '@/lib/i18n'
 import { getToken } from '@/lib/session'
 import { useLiveResource } from '@/lib/useLiveResource'
-import { useQueryParam } from '@/lib/usePathSegment'
+import { useQueryParam } from '@/lib/useQueryParam'
 import type { EntryStatus, EntryView, QueueEventView, QueueSnapshot, QueueStatus } from '@/lib/types'
 import { Alert } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'

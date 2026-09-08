@@ -5,7 +5,7 @@ import { api } from '@/lib/api'
 import { cx, formatClock, formatCountdown, formatWait, notificationLabel } from '@/lib/format'
 import { useI18n } from '@/lib/i18n'
 import { useLiveResource } from '@/lib/useLiveResource'
-import { usePathSegment } from '@/lib/usePathSegment'
+import { useQueryParam } from '@/lib/useQueryParam'
 import type { NotificationView, TicketView } from '@/lib/types'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
@@ -24,7 +24,7 @@ import { PageLoader } from '@/components/PageLoader'
  */
 export default function TicketPage() {
   const { t } = useI18n()
-  const token = usePathSegment(1)
+  const token = useQueryParam('token')
   const [leaveOpen, setLeaveOpen] = useState(false)
   const [leaving, setLeaving] = useState(false)
   const [notifications, setNotifications] = useState<NotificationView[]>([])
@@ -113,7 +113,7 @@ export default function TicketPage() {
         </div>
       ) : ticket.status === 'LEFT' || ticket.status === 'NO_SHOW' ? (
         <div className="mt-6">
-          <a href={`/q/${ticket.queue.id}/`}>
+          <a href={`/q/?id=${ticket.queue.id}`}>
             <Button block>{t('ticket.rejoin')}</Button>
           </a>
         </div>

@@ -5,7 +5,7 @@ import { ApiError, api } from '@/lib/api'
 import { cx, errorMessage } from '@/lib/format'
 import { useI18n } from '@/lib/i18n'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
-import { usePathSegment } from '@/lib/usePathSegment'
+import { useQueryParam } from '@/lib/useQueryParam'
 import type { PublicQueueView, QueueAvailabilityView } from '@/lib/types'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
@@ -21,7 +21,7 @@ import { PageLoader } from '@/components/PageLoader'
  */
 export default function JoinQueuePage() {
   const { t, tp, locale } = useI18n()
-  const queueId = usePathSegment(1)
+  const queueId = useQueryParam('id')
   const [queue, setQueue] = useState<PublicQueueView | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -92,8 +92,8 @@ export default function JoinQueuePage() {
         // Remembered server-side, so the ticket email arrives in the language this page is in.
         locale,
       })
-      // A full navigation, not a client-side push: `/t/{token}` is its own exported shell.
-      window.location.href = `/t/${ticket.ticketToken}/`
+      // A full navigation, not a client-side push: `/t/` is its own exported shell.
+      window.location.href = `/t/?token=${ticket.ticketToken}`
     } catch (cause) {
       setFormError(errorMessage(t, cause))
       setSubmitting(false)
