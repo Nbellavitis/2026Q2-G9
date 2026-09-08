@@ -33,3 +33,7 @@ backend/src/main/resources/application-local.yml
 .env
 .env.local
 !.env.example
+
+# Generados por las herramientas de agentes al correr next dev
+AGENTS.md
+CLAUDE.md
