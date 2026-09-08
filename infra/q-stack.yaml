@@ -61,7 +61,27 @@ Parameters:
     AllowedValues: ['true', 'false']
     Description: >
       Adds scheduled capacity changes for the lunch and dinner peaks the proposal describes. Left off
-      by default so a demo stack cannot quietly double its instance count and its cost.
+      by default so a demo stack cannot quietly change its instance count and its cost.
+
+  RequestCountTarget:
+    Type: Number
+    Default: 500
+    MinValue: 5
+    MaxValue: 10000
+    Description: >
+      Requests per target per minute the reactive policy holds. Calibrated from the five minute SSE
+      timeout: every open stream expires and reconnects on its own, so roughly 2500 concurrent
+      watchers on one instance produce about 500 requests a minute. Lower it to around 10 to
+      demonstrate reactive scaling without generating real load, then put it back.
+
+  CpuTarget:
+    Type: Number
+    Default: 60
+    MinValue: 20
+    MaxValue: 90
+    Description: >
+      Average CPU utilisation the second policy holds. A backstop only: this workload is bound by
+      memory rather than processor time, so this policy is not expected to be the one that decides.
 
 Conditions:
   ScheduledScalingEnabled: !Equals [!Ref EnableScheduledScaling, 'true']
@@ -650,10 +670,49 @@ Resources:
       Tags:
         - { Key: Name, Value: q-app, PropagateAtLaunch: true }
 
-  # Capacity for the lunch and dinner peaks the proposal describes. Scheduled rather than reactive:
-  # metric-driven scaling needs CloudWatch, and these peaks are known in advance anyway - capacity
-  # arrives before the rush rather than three minutes into it.
-  ScaleOutForPeak:
+  # =============================================================================================
+  # SCALING
+  #
+  # Mostly scheduled, and that is a measured decision rather than a default. What limits an instance
+  # here is memory: an open SSE stream costs roughly 95 KB and almost no processor time - 400 idle
+  # streams moved CPU utilisation from 0.11% to 0.72%, which is noise. But memory is the one thing
+  # the group cannot see. EC2's native metrics are published by the hypervisor, which meters what
+  # crosses the virtualisation boundary - processor, network, disk - and cannot look inside the guest
+  # operating system. Reporting memory would need an agent on the instance publishing a custom
+  # metric, which is out of scope here.
+  #
+  # A restaurant fills up by the clock, so the clock is the better predictor anyway: capacity arrives
+  # before the rush instead of three minutes into it.
+  #
+  # Base 2, peak 3, and the whole ceiling of 4 for the weekend dinner. Each action sets MinSize and
+  # DesiredCapacity but leaves MaxSize alone, so the reactive policies below always keep the same
+  # headroom to grow into.
+  # =============================================================================================
+
+  # Nobody queues for a table at four in the morning. Dropping to a single instance gives up
+  # redundancy across Availability Zones for six hours, which is a deliberate trade for cost and not
+  # an oversight - the group is back to two well before service.
+  OvernightTrough:
+    Type: AWS::AutoScaling::ScheduledAction
+    Condition: ScheduledScalingEnabled
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      Recurrence: '0 3 * * *'
+      TimeZone: America/Argentina/Buenos_Aires
+      MinSize: 1
+      DesiredCapacity: 1
+
+  MorningBase:
+    Type: AWS::AutoScaling::ScheduledAction
+    Condition: ScheduledScalingEnabled
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      Recurrence: '0 9 * * *'
+      TimeZone: America/Argentina/Buenos_Aires
+      MinSize: 2
+      DesiredCapacity: 2
+
+  LunchPeak:
     Type: AWS::AutoScaling::ScheduledAction
     Condition: ScheduledScalingEnabled
     Properties:
@@ -661,10 +720,9 @@ Resources:
       Recurrence: '45 11 * * *'
       TimeZone: America/Argentina/Buenos_Aires
       MinSize: 2
-      MaxSize: 4
-      DesiredCapacity: 4
+      DesiredCapacity: 3
 
-  ScaleInAfterPeak:
+  AfternoonTrough:
     Type: AWS::AutoScaling::ScheduledAction
     Condition: ScheduledScalingEnabled
     Properties:
@@ -672,8 +730,92 @@ Resources:
       Recurrence: '30 15 * * *'
       TimeZone: America/Argentina/Buenos_Aires
       MinSize: 2
-      MaxSize: 4
       DesiredCapacity: 2
+
+  # Dinner is split in two because Argentine dinner service runs late, and later still on Friday and
+  # Saturday. Read the day-of-week fields carefully: an action is named for the service it belongs to
+  # but scheduled for the moment it fires, and a Thursday dinner ends at 00:30 on Friday. That is why
+  # the weeknight peak runs 0-4 (Sun-Thu) while its scale-in runs 1-5 (Mon-Fri), and why the weekend
+  # peak runs 5,6 (Fri-Sat) while its scale-in runs 6,0 (Sat-Sun). Day 0 is Sunday.
+  WeeknightDinnerPeak:
+    Type: AWS::AutoScaling::ScheduledAction
+    Condition: ScheduledScalingEnabled
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      Recurrence: '45 19 * * 0-4'
+      TimeZone: America/Argentina/Buenos_Aires
+      MinSize: 2
+      DesiredCapacity: 3
+
+  WeeknightDinnerEnd:
+    Type: AWS::AutoScaling::ScheduledAction
+    Condition: ScheduledScalingEnabled
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      Recurrence: '30 0 * * 1-5'
+      TimeZone: America/Argentina/Buenos_Aires
+      MinSize: 2
+      DesiredCapacity: 2
+
+  # The largest predictable peak of the week, so the schedule spends the entire ceiling on it. The
+  # consequence is worth stating plainly: while this action holds, capacity is already at MaxSize and
+  # the reactive policies below have nothing left to add. Raising MaxSize is the one-line change if
+  # that headroom is wanted.
+  WeekendDinnerPeak:
+    Type: AWS::AutoScaling::ScheduledAction
+    Condition: ScheduledScalingEnabled
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      Recurrence: '45 19 * * 5,6'
+      TimeZone: America/Argentina/Buenos_Aires
+      MinSize: 2
+      DesiredCapacity: 4
+
+  WeekendDinnerEnd:
+    Type: AWS::AutoScaling::ScheduledAction
+    Condition: ScheduledScalingEnabled
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      Recurrence: '0 2 * * 6,0'
+      TimeZone: America/Argentina/Buenos_Aires
+      MinSize: 2
+      DesiredCapacity: 2
+
+  # Two target tracking policies covering what the calendar does not predict: a holiday, a review
+  # that goes around, a kitchen that opens late. The group evaluates both and applies whichever asks
+  # for more capacity. Both use predefined Auto Scaling metrics, so neither needs a custom metric
+  # published with PutMetricData.
+  #
+  # This one can actually see occupancy, and it works because of a decision made elsewhere. The SSE
+  # timeout in application.yml is five minutes, so every open stream expires and the browser's
+  # EventSource reconnects on its own. An idle watcher therefore re-announces itself to the load
+  # balancer twelve times an hour, which turns request count into a proxy for connection count - and
+  # connection count is what consumes the memory that actually limits the instance.
+  RequestCountScalingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      PolicyType: TargetTrackingScaling
+      EstimatedInstanceWarmup: 300
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ALBRequestCountPerTarget
+          ResourceLabel: !Sub '${LoadBalancer.LoadBalancerFullName}/${TargetGroup.TargetGroupFullName}'
+        TargetValue: !Ref RequestCountTarget
+
+  # A genuine last resort rather than an equal partner, and worth being honest about: the
+  # measurements above say this will not be the policy that decides. It is here to catch a
+  # pathological instance - a runaway loop, a garbage collection spiral - not ordinary load.
+  CpuScalingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      PolicyType: TargetTrackingScaling
+      EstimatedInstanceWarmup: 300
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: !Ref CpuTarget
 
   # =============================================================================================
   # CONTENT DELIVERY

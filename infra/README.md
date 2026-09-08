@@ -64,6 +64,8 @@ Console → **CloudFormation → Create stack → Upload a template file** → `
 | `DbPassword` | 12+ characters, matching `/tmp/app.env` |
 | `InstanceType` | `t3.small` |
 | `EnableScheduledScaling` | Leave `false` unless you want to demonstrate the peak-hour schedule |
+| `RequestCountTarget` | `500`. Lower it to ~10 only to demonstrate reactive scaling |
+| `CpuTarget` | `60` |
 
 ## 4. Upload artifacts while it builds
 
@@ -131,6 +133,53 @@ by **different EC2 instances**. That works because a queue change is published o
 channel with `NOTIFY`, and every instance is `LISTEN`ing.
 
 To make the point concrete, check `X-Instance-Id` on both sessions and show they differ.
+
+### Scaling, and why it is mostly on a clock
+
+The interesting part of this stack's scaling is what it *cannot* measure.
+
+An instance here runs out of **memory** long before it runs out of anything else. Each open SSE
+stream costs about 95 KB and essentially no processor time: 400 idle streams moved CPU utilisation
+from 0.11% to 0.72%, which is indistinguishable from an idle machine. So CPU, the obvious metric, is
+blind to the thing that actually fills the instance.
+
+Memory would be the right signal, and it is the one signal the group cannot have. EC2's native
+metrics come from the hypervisor, which meters what crosses the virtualisation boundary — processor,
+network, disk. It cannot see inside the guest operating system, so it does not know how much of the
+instance's RAM is in use. (RDS publishes `FreeableMemory` precisely because AWS runs that operating
+system.) Getting it here would mean an agent on the instance publishing a custom metric.
+
+That leaves two honest options, and the template uses both:
+
+**Scheduled scaling, as the primary mechanism.** A restaurant fills up by the clock, so the clock is
+a better predictor than any metric would be — and capacity arrives *before* the rush rather than
+three minutes into it. Eight actions cover the Argentine service day:
+
+| Time | Days | Instances |
+|---|---|---|
+| 03:00 | every day | 1 — no redundancy across AZs, a deliberate cost trade |
+| 09:00 | every day | 2 |
+| 11:45 | every day | 3 — lunch |
+| 15:30 | every day | 2 |
+| 19:45 | Sun–Thu | 3 — dinner |
+| 00:30 | Mon–Fri | 2 — the previous night's dinner ending |
+| 19:45 | Fri–Sat | 4 — the largest predictable peak of the week |
+| 02:00 | Sat–Sun | 2 — the previous night's dinner ending |
+
+**Target tracking, as a safety net** for what the calendar does not predict. `ALBRequestCountPerTarget`
+is the one that can see occupancy, and only because of a decision made in the application: the SSE
+timeout is five minutes, so every open stream expires and the browser reconnects on its own. An idle
+watcher re-announces itself to the load balancer twelve times an hour, which makes request count a
+proxy for connection count — and connection count is what consumes the memory. A second policy on
+`ASGAverageCPUUtilization` is a genuine last resort, there to catch a pathological instance rather
+than ordinary load; by the measurements above it should never be the policy that decides.
+
+Both are *predefined* Auto Scaling metrics, so neither needs a custom metric published with
+`PutMetricData`.
+
+To demonstrate the reactive policy without generating real load, update the stack with
+`RequestCountTarget=10`, open a handful of browser tabs on `/q/<queueId>`, and watch `DesiredCapacity`
+climb in EC2 → Auto Scaling Groups → *Activity*. Put it back to `500` afterwards.
 
 ---
 
