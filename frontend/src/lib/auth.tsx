@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ApiError, api } from './api'
-import { getToken, setToken } from './session'
+import { getToken, setToken, subscribeToToken } from './session'
 import type { EstablishmentView, UserView } from './types'
 
 const ACTIVE_ESTABLISHMENT_KEY = 'q.staff.establishment'
@@ -13,6 +13,10 @@ interface AuthState {
   activeEstablishment: EstablishmentView | null
   /** True until the stored token has been checked, so guards do not bounce a signed-in user. */
   initialising: boolean
+  /** Set when the session was restored but its establishments could not be loaded. */
+  restoreError: ApiError | null
+  /** Retries the establishment load after a `restoreError`. */
+  retryRestore: () => void
   isOwner: boolean
   login: (email: string, password: string) => Promise<void>
   register: (input: {
@@ -33,6 +37,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [establishments, setEstablishments] = useState<EstablishmentView[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [initialising, setInitialising] = useState(true)
+  const [restoreError, setRestoreError] = useState<ApiError | null>(null)
+  const [restoreAttempt, setRestoreAttempt] = useState(0)
 
   const readStoredActive = () => {
     try {
@@ -66,10 +72,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         setUser(me)
         await loadEstablishments()
+        if (!cancelled) setRestoreError(null)
       } catch (cause) {
         // An expired or revoked token should log you out quietly, not strand you on a broken screen.
         if (cause instanceof ApiError && (cause.status === 401 || cause.status === 403)) {
           setToken(null)
+          setUser(null)
+        } else {
+          // Anything else - the API down, a 500, no network - used to be swallowed here while
+          // `user` stayed set, and the panel then waited forever for an establishment that was
+          // never going to arrive. Record it so the panel can say so and offer a retry.
+          setRestoreError(cause instanceof ApiError ? cause : new ApiError(0, 'NETWORK_ERROR', 'restore failed'))
         }
       } finally {
         if (!cancelled) setInitialising(false)
@@ -80,7 +93,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [loadEstablishments])
+  }, [loadEstablishments, restoreAttempt])
+
+  // The token can now vanish from under us: a 401 anywhere in the app drops it, and so does signing
+  // out in another tab. Either way this session has to end here too.
+  useEffect(
+    () =>
+      subscribeToToken((token) => {
+        if (token === null) {
+          setUser(null)
+          setEstablishments([])
+          setActiveId(null)
+        }
+      }),
+    [],
+  )
 
   const applySession = useCallback(
     async (result: Awaited<ReturnType<typeof api.auth.login>>) => {
@@ -145,6 +172,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       establishments,
       activeEstablishment,
       initialising,
+      restoreError,
+      retryRestore: () => {
+        setRestoreError(null)
+        setInitialising(true)
+        setRestoreAttempt((value) => value + 1)
+      },
       isOwner: activeEstablishment?.role === 'OWNER',
       login,
       register,
@@ -157,6 +190,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       establishments,
       activeEstablishment,
       initialising,
+      restoreError,
       login,
       register,
       logout,

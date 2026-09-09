@@ -5,9 +5,15 @@ import { useId } from 'react'
 import { cx } from '@/lib/format'
 import { useI18n } from '@/lib/i18n'
 
+/*
+ * `focus:outline-none` used to be here. Tailwind's utilities sit in a later cascade layer than
+ * `@layer base`, so it beat the global `:focus-visible` rule outright and every input, number box,
+ * password field and select in the app was left with only a 1px border tint as its focus cue. The
+ * border change stays for the pointer; the ring comes back for the keyboard.
+ */
 const CONTROL =
   'w-full rounded-xl border border-line-strong bg-surface px-3.5 py-2.5 text-ink ' +
-  'placeholder:text-faint transition-colors focus:border-brand focus:outline-none ' +
+  'placeholder:text-faint transition-colors focus:border-brand ' +
   'disabled:opacity-50'
 
 interface FieldProps extends InputHTMLAttributes<HTMLInputElement> {
@@ -62,10 +68,29 @@ export function SelectField({ label, hint, className, id, children, ...rest }: S
       <label htmlFor={fieldId} className="mb-1.5 block text-sm font-medium">
         {label}
       </label>
-      <select {...rest} id={fieldId} className={cx(CONTROL, 'appearance-none pr-9')}>
-        {children}
-      </select>
-      {hint ? <p className="mt-1.5 text-xs text-muted">{hint}</p> : null}
+      <div className="relative">
+        <select
+          {...rest}
+          id={fieldId}
+          // The hint explains what the selected option does, so it has to be part of the control's
+          // description the way Field already does it - not a loose paragraph underneath.
+          aria-describedby={hint ? `${fieldId}-hint` : undefined}
+          className={cx(CONTROL, 'appearance-none pr-9')}
+        >
+          {children}
+        </select>
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 right-3.5 flex items-center text-faint"
+        >
+          ▾
+        </span>
+      </div>
+      {hint ? (
+        <p id={`${fieldId}-hint`} className="mt-1.5 text-xs text-muted">
+          {hint}
+        </p>
+      ) : null}
     </div>
   )
 }

@@ -38,5 +38,29 @@ export function setToken(token: string | null): void {
 
 export function subscribeToToken(listener: (token: string | null) => void): () => void {
   listeners.add(listener)
-  return () => listeners.delete(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+/**
+ * Signing out was tab-local: the other staff tab kept its in-memory copy, stayed signed in, and went
+ * on streaming customer names and email addresses long after the operator thought they had left the
+ * shared terminal. `storage` fires in every *other* tab of the origin, so one sign-out now reaches
+ * all of them - and a sign-in does too, which is what makes "log in here, come back to that tab"
+ * behave the way people expect.
+ */
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key !== TOKEN_KEY && event.key !== null) return
+    let next: string | null = null
+    try {
+      next = window.localStorage.getItem(TOKEN_KEY)
+    } catch {
+      next = null
+    }
+    if (next === inMemoryToken) return
+    inMemoryToken = next
+    listeners.forEach((listener) => listener(next))
+  })
 }

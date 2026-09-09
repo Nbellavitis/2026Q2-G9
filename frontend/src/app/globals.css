@@ -18,23 +18,30 @@
   --color-bg: #fdfbf7;
   --color-surface: #ffffff;
   --color-raised: #f7f1e8;
+  /*
+   * Every foreground below clears WCAG AA (4.5:1) against all three light grounds it can land on:
+   * bg, surface and raised. `faint` used to be #a2958c, which measured 2.59:1 on raised - it read
+   * as "quiet" to a designer on a good screen and as "missing" to everyone else, and it carries
+   * hints, timestamps and helper text. Fixing it meant darkening `muted` too, or the two tiers
+   * would have collapsed into each other.
+   */
   --color-ink: #2b211c;
-  --color-muted: #7c6f67;
-  --color-faint: #a2958c;
+  --color-muted: #655a53;
+  --color-faint: #766d66;
   --color-line: #ebe1d6;
   --color-line-strong: #ddcfc0;
 
   /* Terracotta carries every primary action and the customer's own position. */
-  --color-brand: #c2643b;
-  --color-brand-hover: #ab5531;
+  --color-brand: #a45432;
+  --color-brand-hover: #8c4728;
   --color-brand-soft: #f8e8de;
   --color-on-brand: #fffaf6;
 
   /* Sage means "settled": served, open, healthy. */
-  --color-sage: #5f7657;
+  --color-sage: #5a7053;
   --color-sage-soft: #e6ece1;
 
-  --color-warn: #9a6b12;
+  --color-warn: #906411;
   --color-warn-soft: #fbeed5;
   --color-danger: #a83f34;
   --color-danger-soft: #f9e2de;
@@ -80,6 +87,12 @@
   html {
     -webkit-text-size-adjust: 100%;
     scrollbar-gutter: stable;
+    /*
+     * The staff header is `sticky top-0` and 64px tall. Without this, tabbing to a control just
+     * above the fold scrolls it to the very top of the viewport - directly underneath that header,
+     * where it is completely hidden. WCAG 2.2 SC 2.4.11, Focus Not Obscured.
+     */
+    scroll-padding-top: 5rem;
   }
 
   body {

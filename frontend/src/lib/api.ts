@@ -1,4 +1,4 @@
-import { getToken } from './session'
+import { getToken, setToken } from './session'
 import type {
   AuthResult,
   EntryStatus,
@@ -18,7 +18,6 @@ import type {
   QueueView,
   QueueLaneView,
   TicketView,
-  CallStrategy,
 } from './types'
 
 export const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080').replace(/\/$/, '')
@@ -80,6 +79,17 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   const payload: unknown = text ? safeParse(text) : undefined
 
   if (!response.ok) {
+    /*
+     * A staff token lasts twelve hours, so it expires mid-shift rather than between sessions. The
+     * 401 that follows used to be handled nowhere: the board kept rendering its last snapshot of
+     * customer names and emails, every action failed with a message nobody could act on, and there
+     * was no route back to the sign-in screen. Dropping the token here notifies every subscriber,
+     * which clears the user and lets the panel guard do its job. Public endpoints are exempt - a
+     * customer has no session to end.
+     */
+    if (response.status === 401 && !path.startsWith('/public/') && getToken()) {
+      setToken(null)
+    }
     throw toApiError(response.status, payload)
   }
   return payload as T
@@ -168,18 +178,21 @@ export const api = {
   },
 
   publicApi: {
+    // These two come straight out of the address bar, so they are encoded rather than pasted into
+    // the path: a token containing `../` or a `?` would otherwise retarget the request at a
+    // different endpoint entirely, and the page would fail in a way that looks like a server fault.
     queue: (queueId: string, signal?: AbortSignal) =>
-      request<PublicQueueView>(`/public/queues/${queueId}`, { auth: false, signal }),
+      request<PublicQueueView>(`/public/queues/${encodeURIComponent(queueId)}`, { auth: false, signal }),
     availability: (queueId: string, partySize: number, signal?: AbortSignal) =>
-      request<QueueAvailabilityView>(`/public/queues/${queueId}/availability?partySize=${partySize}`, { auth: false, signal }),
+      request<QueueAvailabilityView>(`/public/queues/${encodeURIComponent(queueId)}/availability?partySize=${partySize}`, { auth: false, signal }),
     join: (queueId: string, body: JoinPayload) =>
-      request<TicketView>(`/public/queues/${queueId}/entries`, { method: 'POST', body, auth: false }),
+      request<TicketView>(`/public/queues/${encodeURIComponent(queueId)}/entries`, { method: 'POST', body, auth: false }),
     ticket: (token: string, signal?: AbortSignal) =>
-      request<TicketView>(`/public/tickets/${token}`, { auth: false, signal }),
+      request<TicketView>(`/public/tickets/${encodeURIComponent(token)}`, { auth: false, signal }),
     leave: (token: string) =>
-      request<TicketView>(`/public/tickets/${token}`, { method: 'DELETE', auth: false }),
+      request<TicketView>(`/public/tickets/${encodeURIComponent(token)}`, { method: 'DELETE', auth: false }),
     notifications: (token: string) =>
-      request<NotificationView[]>(`/public/tickets/${token}/notifications`, { auth: false }),
+      request<NotificationView[]>(`/public/tickets/${encodeURIComponent(token)}/notifications`, { auth: false }),
     qrUrl: (queueId: string, size = 512) => `${V1}/public/queues/${queueId}/qr?size=${size}`,
   },
 

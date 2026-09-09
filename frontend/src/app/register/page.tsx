@@ -3,7 +3,6 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState, type FormEvent } from 'react'
-import { ApiError } from '@/lib/api'
 import { errorMessage } from '@/lib/format'
 import { useAuth } from '@/lib/auth'
 import { useI18n } from '@/lib/i18n'
@@ -64,7 +63,7 @@ export default function RegisterPage() {
           label={t('auth.businessName')}
           value={form.establishmentName}
           onChange={update('establishmentName')}
-          placeholder="Parrilla La Espera"
+          placeholder={t('auth.businessPlaceholder')}
           maxLength={120}
           required
         />

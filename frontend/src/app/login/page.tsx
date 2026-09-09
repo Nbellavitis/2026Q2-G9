@@ -3,7 +3,6 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState, type FormEvent } from 'react'
-import { ApiError } from '@/lib/api'
 import { errorMessage } from '@/lib/format'
 import { useAuth } from '@/lib/auth'
 import { useI18n } from '@/lib/i18n'
@@ -13,10 +12,24 @@ import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
 import { Logo } from '@/components/Logo'
 
+/*
+ * Working credentials for the seeded accounts, with one-click fill. They exist for the live demo
+ * and they are genuinely useful there - but this repository is public and the export is static, so
+ * they otherwise ship to anyone who opens the deployed sign-in page and hand them a real session.
+ * Build with NEXT_PUBLIC_SHOW_DEMO_LOGIN=false to leave them out entirely; the flag is read at
+ * build time, so the block is not merely hidden, it is absent from the bundle.
+ */
+const SHOW_DEMO_LOGIN = process.env.NEXT_PUBLIC_SHOW_DEMO_LOGIN !== 'false'
+
+const DEMO_ACCOUNTS = [
+  { roleKey: 'auth.demoOwner', email: 'owner@demo.q', password: 'demo1234' },
+  { roleKey: 'auth.demoStaff', email: 'staff@demo.q', password: 'demo1234' },
+] as const
+
 export default function LoginPage() {
   const router = useRouter()
   const { login, user, initialising } = useAuth()
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -74,33 +87,31 @@ export default function LoginPage() {
         </Button>
       </form>
 
+      {SHOW_DEMO_LOGIN ? (
       <div className="mt-6 rounded-xl border border-line bg-raised px-4 py-3 text-sm">
-        <p className="font-medium">Demo access</p>
-        <p className="mt-1 text-muted">Owner: owner@demo.q · Password: demo1234</p>
-        <p className="text-muted">Staff: staff@demo.q · Password: demo1234</p>
-        <div className="mt-3 flex gap-2">
-          <button
-            type="button"
-            className="text-brand hover:underline"
-            onClick={() => {
-              setEmail('owner@demo.q')
-              setPassword('demo1234')
-            }}
-          >
-            Use owner account
-          </button>
-          <button
-            type="button"
-            className="text-brand hover:underline"
-            onClick={() => {
-              setEmail('staff@demo.q')
-              setPassword('demo1234')
-            }}
-          >
-            Use staff account
-          </button>
+        <p className="font-medium">{t('auth.demoTitle')}</p>
+        {DEMO_ACCOUNTS.map((account) => (
+          <p key={account.email} className="mt-1 text-muted">
+            {t(account.roleKey)}: {account.email} · {account.password}
+          </p>
+        ))}
+        <div className="mt-3 flex flex-wrap gap-3">
+          {DEMO_ACCOUNTS.map((account) => (
+            <button
+              key={account.email}
+              type="button"
+              className="rounded text-brand hover:underline"
+              onClick={() => {
+                setEmail(account.email)
+                setPassword(account.password)
+              }}
+            >
+              {t('auth.demoUse', { role: t(account.roleKey).toLocaleLowerCase(locale) })}
+            </button>
+          ))}
         </div>
       </div>
+      ) : null}
 
       <p className="mt-6 text-center text-sm text-muted">
         {t('auth.noAccount')}{' '}

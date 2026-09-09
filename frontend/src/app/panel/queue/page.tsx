@@ -1,8 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useState } from 'react'
-import { ApiError, api } from '@/lib/api'
+import { useCallback, useEffect, useId, useState } from 'react'
+import { api } from '@/lib/api'
 import {
   cx,
   entryStatusLabel,
@@ -23,7 +23,7 @@ import { useQueryParam } from '@/lib/useQueryParam'
 import type { EntryStatus, EntryView, QueueEventView, QueueSnapshot, QueueStatus } from '@/lib/types'
 import { Alert } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
+import { Button, ButtonLink } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { EmptyState } from '@/components/EmptyState'
@@ -45,14 +45,19 @@ export default function QueueBoardPage() {
   const [actionError, setActionError] = useState<string | null>(null)
   const [busyEntry, setBusyEntry] = useState<string | null>(null)
   const [calling, setCalling] = useState(false)
+  // Per-lane, so calling from one line does not spin and disable every other line's button.
+  const [callingLane, setCallingLane] = useState<string | null>(null)
   const [confirmClose, setConfirmClose] = useState(false)
   const [events, setEvents] = useState<QueueEventView[]>([])
+  const [pendingStatus, setPendingStatus] = useState<{ entry: EntryView; status: EntryStatus } | null>(null)
 
   // The timeline is the business's record of its own line: who was called, who was served, who never
   // showed. Handing a notification to the mail queue is our plumbing, and it arrives paired with the
   // delivery a moment later, so showing both put two near-identical rows on every alert.
   const visibleEvents = events.filter((event) => event.type !== 'NOTIFICATION_QUEUED')
   const [showActivity, setShowActivity] = useState(false)
+  const [eventsFailed, setEventsFailed] = useState(false)
+  const disclosureId = useId()
 
   useEffect(() => setTokenState(getToken()), [])
 
@@ -70,7 +75,13 @@ export default function QueueBoardPage() {
 
   useEffect(() => {
     if (!queueId || !showActivity) return
-    api.queues.events(queueId, 30).then(setEvents, () => setEvents([]))
+    api.queues.events(queueId, 30).then(
+      (loaded) => {
+        setEvents(loaded)
+        setEventsFailed(false)
+      },
+      () => setEventsFailed(true),
+    )
   }, [queueId, showActivity, board?.generatedAt])
 
   const run = async (task: () => Promise<unknown>, entryId?: string) => {
@@ -84,6 +95,7 @@ export default function QueueBoardPage() {
     } finally {
       setBusyEntry(null)
       setCalling(false)
+      setCallingLane(null)
     }
   }
 
@@ -93,22 +105,38 @@ export default function QueueBoardPage() {
   }
 
   const callLane = (laneId: string) => {
-    setCalling(true)
+    setCallingLane(laneId)
     void run(() => api.queues.call(queueId as string, undefined, laneId))
   }
 
   const setEntryStatus = (entry: EntryView, status: EntryStatus) =>
     void run(() => api.entries.setStatus(entry.id, status), entry.id)
 
+  // Anything that ends a person's visit gets confirmed. "Done" was the odd one out: it is the most
+  // final of the three and it was the only one that fired on a single mis-tap.
+  const askStatus = (entry: EntryView, status: EntryStatus) => {
+    if (status === 'LEFT' || status === 'NO_SHOW' || status === 'SERVED') {
+      setPendingStatus({ entry, status })
+    } else {
+      setEntryStatus(entry, status)
+    }
+  }
+
   const setQueueStatus = (status: QueueStatus) => void run(() => api.queues.setStatus(queueId as string, status))
 
   if (queueId === null) return <Alert kind="error">{t('board.noQueueSelected')}</Alert>
   if (loading && !board) return <PageLoader label={t('board.loading')} />
-  if (error && !board) return <Alert kind="error">{error.message}</Alert>
+  if (error && !board) return <Alert kind="error">{errorMessage(t, error)}</Alert>
   if (!board) return <PageLoader />
 
   const { queue } = board
   const closed = queue.status === 'CLOSED'
+  const allLanes = board.lanes ?? []
+  const activeLanes = allLanes.filter((lane) => lane.lane.active)
+  const strandedLanes = allLanes.filter(
+    (lane) => !lane.lane.active && lane.waiting.length + lane.inService.length > 0,
+  )
+  const shownLanes = [...activeLanes, ...strandedLanes]
 
   return (
     <div className="space-y-6">
@@ -141,18 +169,18 @@ export default function QueueBoardPage() {
               {t('board.close')}
             </Button>
           ) : null}
-          <Link href={`/panel/queue/qr?id=${queue.id}`}>
-            <Button variant="secondary" size="sm">
-              {t('common.qr')}
-            </Button>
-          </Link>
-          <Link href={`/panel/queue/settings?id=${queue.id}`}>
-            <Button variant="secondary" size="sm">
-              {t('common.settings')}
-            </Button>
-          </Link>
+          <ButtonLink href={`/panel/queue/qr?id=${queue.id}`} variant="secondary" size="sm">
+            {t('common.qr')}
+          </ButtonLink>
+          <ButtonLink href={`/panel/queue/settings?id=${queue.id}`} variant="secondary" size="sm">
+            {t('common.settings')}
+          </ButtonLink>
         </div>
       </header>
+
+      <p aria-live="polite" className="sr-only">
+        {t('board.updated', { waiting: board.waitingCount, serving: board.inServiceCount })}
+      </p>
 
       {queue.status === 'PAUSED' ? (
         <Alert kind="warn">{t('board.pausedNotice')}</Alert>
@@ -165,45 +193,92 @@ export default function QueueBoardPage() {
         <Stat label={t('board.statBeingServed')} value={board.inServiceCount} />
         <Stat
           label={t('board.statAverageService')}
-          value={`${board.averageServiceMinutes} min`}
+          value={t('board.minutesUnit', { count: board.averageServiceMinutes })}
           hint={board.usingDefaultServiceTime ? t('board.configuredEstimate') : t('board.measured')}
         />
-        <Stat label={t('board.activeLanes')} value={board.lanes?.filter((lane) => lane.lane.active).length ?? 0} />
+        <Stat label={t('board.activeLanes')} value={activeLanes.length} />
       </div>
 
       <Button size="lg" block onClick={callNext} loading={calling} disabled={closed || board.waitingCount === 0}>
         {board.waitingCount === 0 ? t('board.nobodyWaiting') : t('board.callNext')}
       </Button>
 
-      {board.lanes?.length > 1 ? (
-        <div className="grid gap-4 md:grid-cols-2">
-          {board.lanes.filter((lane) => lane.lane.active).map((lane) => (
-            <Card key={lane.lane.id}>
-              <div className="flex items-start justify-between gap-3">
-                <div><h2 className="font-display text-lg font-semibold">{lane.lane.name}</h2><p className="text-sm text-muted">
+      {shownLanes.length > 1 ? (
+        <div className="grid items-start gap-4 md:grid-cols-2">
+          {shownLanes.map((lane) => (
+            <Card
+              key={lane.lane.id}
+              className={cx('min-w-0', !lane.lane.active && 'border-warn/40 bg-warn-soft/30')}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1 basis-40">
+                  <h2 className="font-display text-lg font-semibold">
+                    {lane.lane.name}
+                    {!lane.lane.active ? (
+                      <span className="ml-2 align-middle">
+                        <Badge tone="warn">{t('lane.closedStillWaiting')}</Badge>
+                      </span>
+                    ) : null}
+                  </h2>
+                  <p className="text-sm text-muted">
                     {t('lane.range', { min: lane.lane.minPartySize, max: lane.lane.maxPartySize ?? '∞' })}
                     {' · '}
                     {tp('lane.waitingCount', lane.waitingGroups)}
-                    {' · '}
-                    {t(lane.lane.capacityMode === 'PERSONS' ? 'lane.capacityPersons' : 'lane.capacityGroups', {
-                      used: lane.capacityUsed,
-                      max: lane.capacityMaximum ?? '∞',
-                    })}
-                  </p></div>
-                <Button size="sm" onClick={() => callLane(lane.lane.id)} loading={calling} disabled={closed || lane.waiting.length === 0}>{t('lane.callNext')}</Button>
+                    {lane.capacityMaximum != null ? (
+                      <>
+                        {' · '}
+                        {t(
+                          lane.lane.capacityMode === 'PERSONS'
+                            ? 'lane.capacityPersons'
+                            : 'lane.capacityGroups',
+                          { used: lane.capacityUsed, max: lane.capacityMaximum },
+                        )}
+                      </>
+                    ) : null}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => callLane(lane.lane.id)}
+                  loading={callingLane === lane.lane.id}
+                  disabled={closed || lane.waiting.length === 0}
+                >
+                  {t('lane.callNext')}
+                </Button>
               </div>
+
               <div className="mt-4 space-y-2">
-                {lane.inService.map((entry) => <ServingCard key={entry.id} entry={entry} busy={busyEntry === entry.id} onStatus={(status) => setEntryStatus(entry, status)} />)}
-                {lane.waiting.map((entry) => <WaitingRow key={entry.id} entry={entry} disabled={closed} busy={busyEntry === entry.id} onStatus={(status) => setEntryStatus(entry, status)} />)}
-                {lane.waiting.length === 0 && lane.inService.length === 0 ? <p className="text-sm text-faint">{t('lane.empty')}</p> : null}
+                {lane.inService.map((entry) => (
+                  <ServingCard
+                    key={entry.id}
+                    entry={entry}
+                    busy={busyEntry === entry.id}
+                    onStatus={(status) => askStatus(entry, status)}
+                  />
+                ))}
+                {lane.waiting.length > 0 ? (
+                  <ol className="space-y-2">
+                    {lane.waiting.map((entry) => (
+                      <WaitingRow
+                        key={entry.id}
+                        entry={entry}
+                        disabled={closed}
+                        busy={busyEntry === entry.id}
+                        onStatus={(status) => askStatus(entry, status)}
+                      />
+                    ))}
+                  </ol>
+                ) : null}
+                {lane.waiting.length === 0 && lane.inService.length === 0 ? (
+                  <p className="text-sm text-faint">{t('lane.empty')}</p>
+                ) : null}
               </div>
             </Card>
           ))}
         </div>
-      ) : null}
-
-      {board.lanes?.length <= 1 ? <div className="grid gap-6 lg:grid-cols-2">
-        <section>
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-2">
+        <section className="min-w-0">
           <h2 className="mb-3 font-display text-lg font-semibold tracking-tight">
             {t('board.nowServing')}{' '}
             <span className="text-muted tnum">{board.inServiceCount > 0 ? board.inServiceCount : ''}</span>
@@ -217,14 +292,14 @@ export default function QueueBoardPage() {
                   key={entry.id}
                   entry={entry}
                   busy={busyEntry === entry.id}
-                  onStatus={(status) => setEntryStatus(entry, status)}
+                  onStatus={(status) => askStatus(entry, status)}
                 />
               ))}
             </div>
           )}
         </section>
 
-        <section>
+        <section className="min-w-0">
           <h2 className="mb-3 font-display text-lg font-semibold tracking-tight">
             {t('board.inLine')}{' '}
             <span className="text-muted tnum">{board.waitingCount > 0 ? board.waitingCount : ''}</span>
@@ -239,13 +314,14 @@ export default function QueueBoardPage() {
                   entry={entry}
                   disabled={closed}
                   busy={busyEntry === entry.id}
-                  onStatus={(status) => setEntryStatus(entry, status)}
+                  onStatus={(status) => askStatus(entry, status)}
                 />
               ))}
             </ol>
           )}
         </section>
-      </div> : null}
+        </div>
+      )}
 
       <section>
         <button
@@ -253,6 +329,7 @@ export default function QueueBoardPage() {
           onClick={() => setShowActivity((value) => !value)}
           className="flex w-full items-center justify-between rounded-xl border border-line bg-surface px-4 py-3 text-left text-sm font-medium transition-colors hover:bg-raised"
           aria-expanded={showActivity}
+          aria-controls={disclosureId}
         >
           <span>{t('board.recentActivity')}</span>
           <span className={cx('text-faint transition-transform', showActivity && 'rotate-180')} aria-hidden>
@@ -260,8 +337,13 @@ export default function QueueBoardPage() {
           </span>
         </button>
         {showActivity ? (
-          <ul className="mt-2 divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface">
-            {visibleEvents.length === 0 ? (
+          <ul
+            id={disclosureId}
+            className="mt-2 divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface"
+          >
+            {eventsFailed ? (
+              <li className="px-4 py-3 text-sm text-danger">{t('board.activityFailed')}</li>
+            ) : visibleEvents.length === 0 ? (
               <li className="px-4 py-3 text-sm text-faint">{t('board.noActivity')}</li>
             ) : (
               visibleEvents.map((event) => (
@@ -278,13 +360,43 @@ export default function QueueBoardPage() {
       </section>
 
       <ConfirmDialog
+        open={pendingStatus !== null}
+        title={t(
+          pendingStatus?.status === 'NO_SHOW'
+            ? 'board.confirmNoShowTitle'
+            : pendingStatus?.status === 'SERVED'
+              ? 'board.confirmDoneTitle'
+              : 'board.confirmRemoveTitle',
+          { name: pendingStatus?.entry.customerName ?? '' },
+        )}
+        description={t(
+          pendingStatus?.status === 'NO_SHOW'
+            ? 'board.confirmNoShowBody'
+            : pendingStatus?.status === 'SERVED'
+              ? 'board.confirmDoneBody'
+              : 'board.confirmRemoveBody',
+        )}
+        confirmLabel={t(
+          pendingStatus?.status === 'NO_SHOW'
+            ? 'board.confirmNoShowAction'
+            : pendingStatus?.status === 'SERVED'
+              ? 'board.confirmDoneAction'
+              : 'board.confirmRemoveAction',
+        )}
+        destructive={pendingStatus?.status !== 'SERVED'}
+        onConfirm={() => {
+          if (pendingStatus) setEntryStatus(pendingStatus.entry, pendingStatus.status)
+          setPendingStatus(null)
+        }}
+        onCancel={() => setPendingStatus(null)}
+      />
+
+      <ConfirmDialog
         open={confirmClose}
         title={t('board.confirmCloseTitle')}
         description={
           board.waitingCount + board.inServiceCount > 0
-            ? t('board.confirmCloseWithPeople', {
-                count: board.waitingCount + board.inServiceCount,
-              })
+            ? tp('board.confirmCloseWithGroups', board.waitingCount + board.inServiceCount)
             : t('board.confirmCloseEmpty')
         }
         confirmLabel={t('board.confirmCloseAction')}
@@ -313,7 +425,7 @@ function ServingCard({
   const expiring = remaining !== null && remaining <= 30
 
   return (
-    <Card className={cx('border-l-4', entry.status === 'CALLED' ? 'border-l-brand' : 'border-l-warn')}>
+    <Card className={cx('min-w-0 border-l-4', entry.status === 'CALLED' ? 'border-l-brand' : 'border-l-warn')}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -368,22 +480,26 @@ function WaitingRow({
   busy: boolean
   onStatus: (status: EntryStatus) => void
 }) {
-  const { t } = useI18n()
+  const { t, tp } = useI18n()
 
   return (
-    <li className="flex items-center gap-3 rounded-xl border border-line bg-surface px-3 py-2.5">
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-line bg-surface px-3 py-2.5">
       <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-raised font-display text-base font-semibold tnum">
         {entry.lanePosition}
       </span>
 
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-36">
         <p className="truncate font-medium">
           {entry.customerName}
-          {entry.partySize ? <span className="ml-1.5 text-sm text-muted">· {entry.partySize}</span> : null}
+          {entry.partySize ? (
+            <span className="ml-1.5 text-sm font-normal text-muted">
+              · {t('board.partyOf', { count: entry.partySize })}
+            </span>
+          ) : null}
         </p>
         <p className="text-xs text-muted tnum">
           #{entry.ticketNumber} · {t('board.waitingFor', { since: formatSince(t, entry.joinedAt) })}
-          {entry.noShowCount > 0 ? ` · ${t('board.noShowCount', { count: entry.noShowCount })}` : ''}
+          {entry.noShowCount > 0 ? ` · ${tp('board.noShowCount', entry.noShowCount)}` : ''}
         </p>
       </div>
 
@@ -391,11 +507,24 @@ function WaitingRow({
         {formatWaitNeutral(t, entry.estimatedWaitMinutes)}
       </span>
 
-      <div className="flex shrink-0 gap-1">
-        <Button size="sm" onClick={() => onStatus('CALLED')} loading={busy} disabled={disabled}>
+      <div className="flex shrink-0 gap-1 max-sm:w-full max-sm:justify-end">
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => onStatus('CALLED')}
+          loading={busy}
+          disabled={disabled}
+          aria-label={t('board.callNamed', { name: entry.customerName })}
+        >
           {t('board.call')}
         </Button>
-        <Button size="sm" variant="ghost" onClick={() => onStatus('LEFT')} disabled={busy}>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => onStatus('LEFT')}
+          disabled={busy}
+          aria-label={t('board.removeNamed', { name: entry.customerName })}
+        >
           {t('board.remove')}
         </Button>
       </div>
@@ -411,13 +540,16 @@ function useTicker(seconds: number | undefined, resetKey: string | undefined): n
     setValue(seconds ?? null)
   }, [seconds, resetKey])
 
+  // Restart the interval only when the countdown appears or disappears, not on every tick.
+  const idle = value === null
+
   useEffect(() => {
-    if (value === null) return
+    if (idle) return
     const timer = window.setInterval(() => {
       setValue((current) => (current === null ? null : Math.max(0, current - 1)))
     }, 1000)
     return () => window.clearInterval(timer)
-  }, [value === null])
+  }, [idle])
 
   return value
 }

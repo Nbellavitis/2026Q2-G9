@@ -1,16 +1,15 @@
 'use client'
 
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { ApiError, api } from '@/lib/api'
+import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useI18n } from '@/lib/i18n'
-import { formatMinutes, formatPercent, formatWaitNeutral, queueStatusLabel, queueStatusTone, errorMessage } from '@/lib/format'
+import { errorMessage, formatMinutes, formatPercent, queueStatusLabel, queueStatusTone } from '@/lib/format'
 import type { MetricsView, QueueSnapshot, QueueView } from '@/lib/types'
 import { Alert } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
+import { Button, ButtonLink } from '@/components/ui/Button'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { Field } from '@/components/ui/Field'
 import { EmptyState } from '@/components/EmptyState'
@@ -20,7 +19,8 @@ import { Stat } from '@/components/Stat'
 /** The operator's home: how today is going, and every queue at a glance. */
 export default function PanelHomePage() {
   const router = useRouter()
-  const { activeEstablishment, isOwner } = useAuth()
+  const { activeEstablishment, isOwner, establishments, initialising, restoreError, retryRestore } =
+    useAuth()
   const { t } = useI18n()
   const establishmentId = activeEstablishment?.id ?? null
 
@@ -38,7 +38,11 @@ export default function PanelHomePage() {
       setError(null)
     } catch (cause) {
       setError(errorMessage(t, cause))
-      setQueues([])
+      // Deliberately NOT `setQueues([])`. An empty array is indistinguishable from "this business
+      // has no queues", so a transient failure used to render the "You have no queues yet" empty
+      // state complete with a Create button - inviting the owner to make a duplicate of a queue
+      // that already exists and is merely unreachable.
+      setQueues((current) => current ?? null)
     }
   }, [establishmentId, t])
 
@@ -51,6 +55,10 @@ export default function PanelHomePage() {
   useEffect(() => {
     if (!establishmentId || !queues) return
 
+    // Without this, switching establishment left the previous one's sweep in flight; whichever
+    // response landed last won, and the tiles could end up showing another business's numbers.
+    let cancelled = false
+
     const refresh = async () => {
       const [snapshots, summary] = await Promise.all([
         Promise.all(
@@ -58,17 +66,43 @@ export default function PanelHomePage() {
         ),
         api.establishments.metrics(establishmentId, 'TODAY').catch(() => null),
       ])
+      if (cancelled) return
       setBoards(Object.fromEntries(snapshots.filter((entry) => entry !== null)))
       if (summary) setMetrics(summary)
     }
 
     void refresh()
     const timer = window.setInterval(refresh, 10_000)
-    return () => window.clearInterval(timer)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
   }, [establishmentId, queues])
 
+  // A signed-in operator whose establishments failed to load, or who has none, used to sit on a
+  // spinner with no explanation and no way out.
+  if (restoreError || (!initialising && establishments.length === 0)) {
+    return (
+      <EmptyState
+        title={restoreError ? t('panel.noAccessTitle') : t('panel.noEstablishmentTitle')}
+        description={restoreError ? t('panel.noAccessBody') : t('panel.noEstablishmentBody')}
+        action={
+          restoreError ? <Button onClick={retryRestore}>{t('panel.retry')}</Button> : undefined
+        }
+      />
+    )
+  }
   if (!activeEstablishment) return <PageLoader label={t('panel.loadingEstablishment')} />
-  if (queues === null) return <PageLoader label={t('panel.loadingQueues')} />
+  if (queues === null) {
+    return error ? (
+      <div className="space-y-4">
+        <Alert kind="error">{error}</Alert>
+        <Button onClick={() => void loadQueues()}>{t('panel.retry')}</Button>
+      </div>
+    ) : (
+      <PageLoader label={t('panel.loadingQueues')} />
+    )
+  }
 
   return (
     <div className="space-y-8">
@@ -136,7 +170,7 @@ export default function PanelHomePage() {
             }
           />
         ) : (
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid items-start gap-4 md:grid-cols-2">
             {queues.map((queue) => (
               <QueueCard key={queue.id} queue={queue} board={boards[queue.id]} />
             ))}
@@ -151,7 +185,7 @@ function QueueCard({ queue, board }: { queue: QueueView; board: QueueSnapshot | 
   const { t } = useI18n()
 
   return (
-    <Card className="flex flex-col">
+    <Card className="flex min-w-0 flex-col">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="truncate font-display text-lg font-semibold tracking-tight">{queue.name}</h3>
@@ -164,7 +198,7 @@ function QueueCard({ queue, board }: { queue: QueueView; board: QueueSnapshot | 
         </Badge>
       </div>
 
-      <div className="mt-5 flex items-baseline gap-6">
+      <div className="mt-5 flex flex-wrap items-baseline gap-x-6 gap-y-2">
         <div>
           <div className="font-display text-3xl font-semibold tnum">{board?.waitingCount ?? '—'}</div>
           <div className="text-xs text-muted">{t('panel.waiting')}</div>
@@ -176,21 +210,15 @@ function QueueCard({ queue, board }: { queue: QueueView; board: QueueSnapshot | 
       </div>
 
       <div className="mt-6 flex flex-wrap gap-2">
-        <Link href={`/panel/queue?id=${queue.id}`} className="flex-1">
-          <Button block size="sm">
-            {t('panel.openBoard')}
-          </Button>
-        </Link>
-        <Link href={`/panel/queue/qr?id=${queue.id}`}>
-          <Button variant="secondary" size="sm">
-            {t('common.qr')}
-          </Button>
-        </Link>
-        <Link href={`/panel/queue/settings?id=${queue.id}`}>
-          <Button variant="secondary" size="sm">
-            {t('common.settings')}
-          </Button>
-        </Link>
+        <ButtonLink href={`/panel/queue?id=${queue.id}`} size="sm" className="flex-1">
+          {t('panel.openBoard')}
+        </ButtonLink>
+        <ButtonLink href={`/panel/queue/qr?id=${queue.id}`} variant="secondary" size="sm">
+          {t('common.qr')}
+        </ButtonLink>
+        <ButtonLink href={`/panel/queue/settings?id=${queue.id}`} variant="secondary" size="sm">
+          {t('common.settings')}
+        </ButtonLink>
       </div>
     </Card>
   )

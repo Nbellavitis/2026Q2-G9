@@ -50,6 +50,23 @@ export function useLiveResource<T>({
   const loadRef = useRef(load)
   loadRef.current = load
 
+  /*
+   * Three things write `data`: the first load, an explicit refresh, and the stream. They race.
+   * A poll issued while the stream was down could resolve seconds later - after the stream had
+   * reconnected and pushed a newer snapshot - and roll the board back to the older state, which on
+   * a queue looks exactly like a customer reappearing after being served. Each read takes a ticket
+   * before it starts; a result whose ticket is older than what has already been applied is dropped.
+   */
+  const nextIssue = useRef(0)
+  const lastApplied = useRef(-1)
+
+  const apply = useCallback((value: T, issue: number) => {
+    if (issue < lastApplied.current) return
+    lastApplied.current = issue
+    setData(value)
+    setError(null)
+  }, [])
+
   const refresh = useCallback(() => setNonce((value) => value + 1), [])
 
   // Initial load, and any explicit refresh.
@@ -60,14 +77,14 @@ export function useLiveResource<T>({
     }
     const controller = new AbortController()
     let cancelled = false
+    const issue = nextIssue.current++
 
     setLoading(true)
     loadRef
       .current(controller.signal)
       .then((value) => {
         if (cancelled) return
-        setData(value)
-        setError(null)
+        apply(value, issue)
       })
       .catch((cause: unknown) => {
         if (cancelled || controller.signal.aborted) return
@@ -81,7 +98,7 @@ export function useLiveResource<T>({
       cancelled = true
       controller.abort()
     }
-  }, [enabled, nonce])
+  }, [enabled, nonce, apply])
 
   // The stream.
   useEffect(() => {
@@ -91,8 +108,9 @@ export function useLiveResource<T>({
 
     const onPayload = (event: MessageEvent<string>) => {
       try {
-        setData(JSON.parse(event.data) as T)
-        setError(null)
+        // A pushed frame is by definition the freshest thing we have, so it takes a ticket at the
+        // moment it arrives rather than when the connection opened.
+        apply(JSON.parse(event.data) as T, nextIssue.current++)
       } catch {
         // A malformed frame is not worth tearing the connection down for.
       }
@@ -107,17 +125,20 @@ export function useLiveResource<T>({
       source.close()
       setLive(false)
     }
-  }, [enabled, url, eventName])
+  }, [enabled, url, eventName, apply])
 
   // Fallback polling, active only while the stream is not carrying updates.
   useEffect(() => {
     if (!enabled || live) return
+    // One controller for the whole interval, aborted on cleanup: the old code minted a fresh one
+    // per tick and never aborted any of them, so unmounting the page - or the stream coming back -
+    // left every in-flight poll running to completion.
+    const controller = new AbortController()
     const timer = window.setInterval(() => {
-      const controller = new AbortController()
+      const issue = nextIssue.current++
       loadRef.current(controller.signal).then(
         (value) => {
-          setData(value)
-          setError(null)
+          if (!controller.signal.aborted) apply(value, issue)
         },
         () => {
           // Keep showing the last good state rather than blanking the screen on a blip.
@@ -125,8 +146,11 @@ export function useLiveResource<T>({
       )
     }, pollMs)
 
-    return () => window.clearInterval(timer)
-  }, [enabled, live, pollMs])
+    return () => {
+      window.clearInterval(timer)
+      controller.abort()
+    }
+  }, [enabled, live, pollMs, apply])
 
   return { data, error, live, loading, refresh }
 }

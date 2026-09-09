@@ -1,19 +1,20 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { api } from '@/lib/api'
-import { cx, formatClock, formatCountdown, formatWait, notificationLabel } from '@/lib/format'
+import { cx, errorMessage, formatClock, formatCountdown, notificationLabel } from '@/lib/format'
 import { useI18n } from '@/lib/i18n'
 import { useLiveResource } from '@/lib/useLiveResource'
 import { useQueryParam } from '@/lib/useQueryParam'
 import type { NotificationView, TicketView } from '@/lib/types'
 import { Alert } from '@/components/ui/Alert'
-import { Button } from '@/components/ui/Button'
+import { Button, ButtonAnchor } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { LiveDot } from '@/components/LiveDot'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
 import { LogoMark } from '@/components/Logo'
 import { PageLoader } from '@/components/PageLoader'
+import { WaitFigure } from '@/components/WaitFigure'
 
 /**
  * Functionalities 2, 3 and 5 — the screen a customer actually keeps open.
@@ -29,6 +30,9 @@ export default function TicketPage() {
   const [leaving, setLeaving] = useState(false)
   const [notifications, setNotifications] = useState<NotificationView[]>([])
   const [showUpdates, setShowUpdates] = useState(false)
+  const [leaveError, setLeaveError] = useState<string | null>(null)
+  const [updatesFailed, setUpdatesFailed] = useState(false)
+  const disclosureId = useId()
 
   const load = useCallback(
     (signal: AbortSignal) => api.publicApi.ticket(token as string, signal),
@@ -44,18 +48,28 @@ export default function TicketPage() {
 
   useEffect(() => {
     if (!token || !showUpdates) return
-    api.publicApi.notifications(token).then(setNotifications, () => setNotifications([]))
+    api.publicApi.notifications(token).then(
+      (loaded) => {
+        setNotifications(loaded)
+        setUpdatesFailed(false)
+      },
+      () => setUpdatesFailed(true),
+    )
   }, [token, showUpdates, ticket?.status])
+
+  useTurnSignal(ticket ?? null)
 
   const leave = async () => {
     if (!token) return
     setLeaving(true)
+    setLeaveError(null)
     try {
       await api.publicApi.leave(token)
       setLeaveOpen(false)
       refresh()
-    } catch {
+    } catch (cause) {
       setLeaveOpen(false)
+      setLeaveError(errorMessage(t, cause))
     } finally {
       setLeaving(false)
     }
@@ -69,7 +83,7 @@ export default function TicketPage() {
     return (
       <Shell>
         <Alert kind="error">
-          {error.status === 404 ? t('ticket.notFound') : error.message}
+          {error.status === 404 ? t('ticket.notFound') : errorMessage(t, error)}
         </Alert>
       </Shell>
     )
@@ -84,7 +98,9 @@ export default function TicketPage() {
           <h1 className="mt-0.5 truncate font-display text-2xl font-semibold tracking-tight">
             {ticket.queue.name}
           </h1>
-          {ticket.laneName ? <p className="mt-1 text-sm text-muted">Lane: {ticket.laneName}</p> : null}
+          {ticket.laneName ? (
+            <p className="mt-1 text-sm text-muted">{t('ticket.yourLine', { name: ticket.laneName })}</p>
+          ) : null}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <span className="rounded-full bg-raised px-2.5 py-1 text-xs font-medium text-muted tnum">
@@ -93,6 +109,17 @@ export default function TicketPage() {
           <LiveDot live={live} />
         </div>
       </header>
+
+      {/*
+        The status change is pushed while the phone is very likely in a pocket. Announcing it to
+        assistive technology costs nothing and is the only channel that reaches a screen reader
+        user at all; the tab title and the buzz in `useTurnSignal` cover everyone else.
+      */}
+      <p aria-live="assertive" className="sr-only">
+        {ticket.status === 'CALLED'
+          ? t('ticket.calledAnnounce', { establishment: ticket.queue.establishmentName })
+          : ''}
+      </p>
 
       <div className="mt-6">
         {ticket.status === 'CALLED' ? (
@@ -104,6 +131,12 @@ export default function TicketPage() {
         )}
       </div>
 
+      {leaveError ? (
+        <div className="mt-6">
+          <Alert kind="error">{leaveError}</Alert>
+        </div>
+      ) : null}
+
       {ticket.status === 'WAITING' || ticket.status === 'CALLED' ? (
         <div className="mt-6">
           <Button variant="secondary" block onClick={() => setLeaveOpen(true)}>
@@ -113,9 +146,9 @@ export default function TicketPage() {
         </div>
       ) : ticket.status === 'LEFT' || ticket.status === 'NO_SHOW' ? (
         <div className="mt-6">
-          <a href={`/q/?id=${ticket.queue.id}`}>
-            <Button block>{t('ticket.rejoin')}</Button>
-          </a>
+          <ButtonAnchor href={`/q/?id=${ticket.queue.id}`} block>
+            {t('ticket.rejoin')}
+          </ButtonAnchor>
         </div>
       ) : null}
 
@@ -125,6 +158,7 @@ export default function TicketPage() {
           onClick={() => setShowUpdates((value) => !value)}
           className="flex w-full items-center justify-between rounded-xl border border-line bg-surface px-4 py-3 text-left text-sm font-medium transition-colors hover:bg-raised"
           aria-expanded={showUpdates}
+          aria-controls={disclosureId}
         >
           <span>{t('ticket.updates')}</span>
           <span className={cx('text-faint transition-transform', showUpdates && 'rotate-180')} aria-hidden>
@@ -133,8 +167,10 @@ export default function TicketPage() {
         </button>
 
         {showUpdates ? (
-          <ul className="mt-2 space-y-1.5">
-            {notifications.length === 0 ? (
+          <ul id={disclosureId} className="mt-2 space-y-1.5">
+            {updatesFailed ? (
+              <li className="px-4 py-3 text-sm text-danger">{t('ticket.updatesFailed')}</li>
+            ) : notifications.length === 0 ? (
               <li className="px-4 py-3 text-sm text-faint">{t('ticket.noUpdates')}</li>
             ) : (
               notifications.map((notification) => (
@@ -189,7 +225,7 @@ function WaitingHero({ ticket }: { ticket: TicketView }) {
         </p>
       </div>
 
-      <div className="mt-3 grid grid-cols-3 gap-3">
+      <div className="mt-3 grid grid-cols-2 gap-3">
         <div className="rounded-2xl border border-line bg-surface p-5">
           <div className="font-display text-3xl font-semibold tnum">{ticket.groupsInService}</div>
           <div className="mt-1 text-sm text-muted">
@@ -197,14 +233,8 @@ function WaitingHero({ ticket }: { ticket: TicketView }) {
           </div>
         </div>
         <div className="rounded-2xl border border-line bg-surface p-5">
-          <div className="font-display text-3xl font-semibold tnum">
-            {formatWait(t, ticket.estimatedWaitMinutes)}
-          </div>
+          <WaitFigure minutes={ticket.estimatedWaitMinutes} />
           <div className="mt-1 text-sm text-muted">{t('ticket.estimatedWait')}</div>
-        </div>
-        <div className="rounded-2xl border border-line bg-surface p-5">
-          <div className="font-display text-3xl font-semibold tnum">{ticket.lanePosition ?? '—'}</div>
-          <div className="mt-1 text-sm text-muted">place in your lane</div>
         </div>
       </div>
 
@@ -292,6 +322,46 @@ function ClosingHero({ ticket }: { ticket: TicketView }) {
   )
 }
 
+/**
+ * Carries "it's your turn" past the edge of the viewport.
+ *
+ * <p>The invitation on this page is to close it and get on with your evening, which means the one
+ * moment that matters usually arrives while the tab is in the background. Three signals, none of
+ * them requiring a permission prompt: the tab title, so a glance at the browser is enough; a short
+ * vibration on the phones that support it; and a live region for a screen reader. A notification
+ * would need `Notification.requestPermission`, and asking for that before the customer has any
+ * reason to trust the page is how permission prompts get denied forever.
+ */
+function useTurnSignal(ticket: TicketView | null) {
+  const { t } = useI18n()
+  const previousStatus = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!ticket) return
+
+    document.title =
+      ticket.status === 'CALLED'
+        ? t('ticket.tabCalled')
+        : ticket.status === 'WAITING'
+          ? t('ticket.tabWaiting', { count: ticket.globalWaitingGroupsAhead ?? 0 })
+          : 'Q'
+
+    const arrived = previousStatus.current !== null && previousStatus.current !== 'CALLED'
+    previousStatus.current = ticket.status
+    if (ticket.status !== 'CALLED' || !arrived) return
+
+    try {
+      navigator.vibrate?.([180, 90, 180])
+    } catch {
+      // Vibration is a nicety, and some browsers throw rather than no-op when it is unavailable.
+    }
+  }, [ticket, t])
+
+  useEffect(() => () => {
+    document.title = 'Q'
+  }, [])
+}
+
 /** Remembers the worst position seen, which is what makes "you've moved up N places" meaningful. */
 function useHighWaterMark(value: number): number {
   const ref = useRef(value)
@@ -310,13 +380,16 @@ function useCountdown(seconds: number | undefined, resetKey: string | undefined)
     setRemaining(seconds ?? null)
   }, [seconds, resetKey])
 
+  // Restart the interval only when the countdown appears or disappears, not on every tick.
+  const idle = remaining === null
+
   useEffect(() => {
-    if (remaining === null) return
+    if (idle) return
     const timer = window.setInterval(() => {
       setRemaining((value) => (value === null ? null : Math.max(0, value - 1)))
     }, 1000)
     return () => window.clearInterval(timer)
-  }, [remaining === null])
+  }, [idle])
 
   return remaining
 }

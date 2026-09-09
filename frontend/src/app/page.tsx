@@ -1,10 +1,9 @@
 'use client'
 
-import Link from 'next/link'
 import { useI18n } from '@/lib/i18n'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
 import { Logo } from '@/components/Logo'
-import { Button } from '@/components/ui/Button'
+import { ButtonLink } from '@/components/ui/Button'
 
 export default function HomePage() {
   const { t } = useI18n()
@@ -16,20 +15,18 @@ export default function HomePage() {
   ]
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-3xl flex-col px-6 py-8">
+    <div className="mx-auto flex min-h-dvh max-w-3xl flex-col px-6 py-8">
       <header className="flex items-center justify-between gap-3">
         <Logo />
         <div className="flex items-center gap-2">
           <LanguageSwitcher />
-          <Link href="/login">
-            <Button variant="ghost" size="sm">
-              {t('common.signIn')}
-            </Button>
-          </Link>
+          <ButtonLink href="/login" variant="ghost" size="sm">
+            {t('common.signIn')}
+          </ButtonLink>
         </div>
       </header>
 
-      <div className="flex flex-1 flex-col justify-center py-16">
+      <main className="flex flex-1 flex-col justify-center py-16">
         <p className="text-sm font-medium text-brand">{t('landing.eyebrow')}</p>
         <h1 className="mt-3 font-display text-[clamp(2.5rem,8vw,4rem)] leading-[0.95] font-semibold tracking-tight text-balance">
           {t('landing.headlineTop')}
@@ -39,14 +36,12 @@ export default function HomePage() {
         <p className="mt-6 max-w-xl text-lg text-muted">{t('landing.lede')}</p>
 
         <div className="mt-9 flex flex-wrap gap-3">
-          <Link href="/register">
-            <Button size="lg">{t('landing.ctaPrimary')}</Button>
-          </Link>
-          <Link href="/login">
-            <Button size="lg" variant="secondary">
-              {t('landing.ctaSecondary')}
-            </Button>
-          </Link>
+          <ButtonLink href="/register" size="lg">
+            {t('landing.ctaPrimary')}
+          </ButtonLink>
+          <ButtonLink href="/login" size="lg" variant="secondary">
+            {t('landing.ctaSecondary')}
+          </ButtonLink>
         </div>
 
         <dl className="mt-16 grid gap-6 sm:grid-cols-3">
@@ -57,9 +52,9 @@ export default function HomePage() {
             </div>
           ))}
         </dl>
-      </div>
+      </main>
 
       <footer className="border-t border-line pt-6 text-xs text-faint">{t('landing.footer')}</footer>
-    </main>
+    </div>
   )
 }

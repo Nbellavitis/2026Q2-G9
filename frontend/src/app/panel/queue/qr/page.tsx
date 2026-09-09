@@ -2,13 +2,13 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { ApiError, api } from '@/lib/api'
+import { api } from '@/lib/api'
 import { errorMessage } from '@/lib/format'
 import { useI18n } from '@/lib/i18n'
 import { useQueryParam } from '@/lib/useQueryParam'
 import type { QueueView } from '@/lib/types'
 import { Alert } from '@/components/ui/Alert'
-import { Button } from '@/components/ui/Button'
+import { Button, ButtonAnchor } from '@/components/ui/Button'
 import { PageLoader } from '@/components/PageLoader'
 
 /**
@@ -23,6 +23,7 @@ export default function QueueQrPage() {
   const [queue, setQueue] = useState<QueueView | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [copyFailed, setCopyFailed] = useState(false)
 
   useEffect(() => {
     if (!queueId) return
@@ -36,9 +37,13 @@ export default function QueueQrPage() {
     try {
       await navigator.clipboard.writeText(queue.joinUrl)
       setCopied(true)
+      setCopyFailed(false)
       window.setTimeout(() => setCopied(false), 2000)
     } catch {
+      // Denied permission, or an insecure origin. Saying so beats a button that just does nothing:
+      // the link is printed in full on the sheet below, so there is always a way to get it.
       setCopied(false)
+      setCopyFailed(true)
     }
   }
 
@@ -60,7 +65,9 @@ export default function QueueQrPage() {
         <p className="mt-4 text-lg text-muted">{t('qr.scanToJoin')}</p>
 
         <div className="mt-8 flex justify-center">
-          {/* Public endpoint, so a plain <img> works and the sheet prints from any browser. */}
+          {/* Public endpoint, so a plain <img> works and the sheet prints from any browser.
+              next/image is not an option: this is a static export with the optimizer disabled. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={api.publicApi.qrUrl(queue.id, 640)}
             alt={t('qr.alt', { queue: queue.name })}
@@ -74,14 +81,20 @@ export default function QueueQrPage() {
         <p className="mt-4 font-mono text-xs break-all text-faint">{queue.joinUrl}</p>
       </div>
 
+      {copyFailed ? (
+        <div className="no-print mt-6">
+          <Alert kind="warn">{t('qr.copyFailed')}</Alert>
+        </div>
+      ) : null}
+
       <div className="no-print mt-6 flex flex-wrap justify-center gap-2">
         <Button onClick={() => window.print()}>{t('qr.print')}</Button>
         <Button variant="secondary" onClick={copy}>
           {copied ? t('qr.linkCopied') : t('qr.copyLink')}
         </Button>
-        <a href={queue.joinUrl} target="_blank" rel="noreferrer">
-          <Button variant="ghost">{t('qr.preview')}</Button>
-        </a>
+        <ButtonAnchor href={queue.joinUrl} target="_blank" rel="noreferrer" variant="ghost">
+          {t('qr.preview')}
+        </ButtonAnchor>
       </div>
     </div>
   )

@@ -39,7 +39,13 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
           {establishments.length > 1 ? (
             <select
               value={activeEstablishment?.id ?? ''}
-              onChange={(event) => selectEstablishment(event.target.value)}
+              onChange={(event) => {
+                selectEstablishment(event.target.value)
+                // Every page below this header is scoped to a queue id belonging to the business
+                // that was selected a moment ago. Without this the header changed and the board
+                // did not, leaving the operator looking at another business's line.
+                router.replace('/panel')
+              }}
               aria-label={t('panel.establishment')}
               className="max-w-[42vw] truncate rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 text-sm"
             >
