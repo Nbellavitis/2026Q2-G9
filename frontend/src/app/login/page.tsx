@@ -12,13 +12,21 @@ import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
 
 /*
- * Working credentials for the seeded accounts, with one-click fill. They exist for the live demo
- * and they are genuinely useful there - but this repository is public and the export is static, so
- * they otherwise ship to anyone who opens the deployed sign-in page and hand them a real session.
- * Build with NEXT_PUBLIC_SHOW_DEMO_LOGIN=false to leave them out entirely; the flag is read at
- * build time, so the block is not merely hidden, it is absent from the bundle.
+ * Working credentials for the seeded accounts, with one-click fill. Genuinely useful in front of a
+ * class; a printed invitation on a page anyone can open otherwise.
+ *
+ * <p>Opt in, not opt out. This was `!== 'false'`, which ships the block unless somebody remembers
+ * the flag at build time - and nobody did: the credentials went out with the deployed site. A
+ * default that is only safe when a person remembers something is not a safe default. The flag is
+ * read at build time, so with it unset the block is absent from the bundle rather than hidden in
+ * it, and `.env.development` turns it back on for `next dev` without anyone having to think about
+ * it.
+ *
+ * <p>The accounts themselves only exist where `q.seed.enabled` is true, which is the dev profile
+ * alone. Publishing the passwords to a database that never had those users is still publishing
+ * them: the day someone points a seeded build at the real database, the door is already open.
  */
-const SHOW_DEMO_LOGIN = process.env.NEXT_PUBLIC_SHOW_DEMO_LOGIN !== 'false'
+const SHOW_DEMO_LOGIN = process.env.NEXT_PUBLIC_SHOW_DEMO_LOGIN === 'true'
 
 const DEMO_ACCOUNTS = [
   { roleKey: 'auth.demoOwner', email: 'owner@demo.q', password: 'demo1234' },
