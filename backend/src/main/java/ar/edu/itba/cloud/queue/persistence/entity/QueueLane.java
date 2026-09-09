@@ -21,6 +21,8 @@ public class QueueLane {
     @Column(name = "time_factor", nullable = false, precision = 8, scale = 3) private BigDecimal timeFactor = BigDecimal.ONE;
     @Column(nullable = false) private boolean active = true;
     @Column(name = "created_at", nullable = false, updatable = false) private Instant createdAt;
+    /** Set when the lane is retired. The row stays so the entries it served keep their band. */
+    @Column(name = "deleted_at") private Instant deletedAt;
 
     protected QueueLane() { }
     public QueueLane(ServiceQueue queue, String name, int minPartySize, Integer maxPartySize, int priority,
@@ -38,5 +40,9 @@ public class QueueLane {
     public Integer getMaxSize() { return maxSize; } public void setMaxSize(Integer v) { maxSize = v; }
     public BigDecimal getTimeFactor() { return timeFactor; } public void setTimeFactor(BigDecimal v) { timeFactor = v; }
     public boolean isActive() { return active; } public void setActive(boolean v) { active = v; }
+    public Instant getDeletedAt() { return deletedAt; }
+    public boolean isDeleted() { return deletedAt != null; }
+    /** Retires the lane. Deleted implies inactive - the database enforces that pairing too. */
+    public void markDeleted(Instant when) { deletedAt = when; active = false; }
     public boolean accepts(int partySize) { return active && partySize >= minPartySize && (maxPartySize == null || partySize <= maxPartySize); }
 }

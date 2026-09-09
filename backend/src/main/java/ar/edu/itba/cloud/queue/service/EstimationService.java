@@ -48,7 +48,7 @@ public class EstimationService {
      * simulation runs, and the cursor is only meaningful against the whole set.
      */
     private List<QueueLane> rotation(ServiceQueue queue) {
-        return selector.rotation(laneRepository.findAllByQueueIdOrderByPriorityAscMinPartySizeAsc(queue.getId()));
+        return selector.rotation(laneRepository.findAllByQueueIdAndDeletedAtIsNullOrderByPriorityAscMinPartySizeAsc(queue.getId()));
     }
 
     /** Mean duration of the most recent completed services on this queue. */

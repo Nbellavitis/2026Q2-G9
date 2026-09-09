@@ -59,7 +59,7 @@ public class QueueViewFactory {
                 queue.getNotifyAtMinutes(),
                 properties.joinUrl(queue.getId()),
                 queue.getCreatedAt(),
-                queue.getUpdatedAt(), queue.getArchivedAt(), laneRepository.findAllByQueueIdOrderByPriorityAscMinPartySizeAsc(queue.getId()).stream()
+                queue.getUpdatedAt(), queue.getArchivedAt(), laneRepository.findAllByQueueIdAndDeletedAtIsNullOrderByPriorityAscMinPartySizeAsc(queue.getId()).stream()
                         .map(l -> new QueueLaneView(l.getId(), l.getName(), l.getMinPartySize(), l.getMaxPartySize(), l.getPriority(),
                         l.getCapacityMode(), l.getMaxSize(), l.getTimeFactor(), l.isActive())).toList(), queue.getCallStrategy());
     }
@@ -202,7 +202,7 @@ public class QueueViewFactory {
                 queue.acceptsNewEntries() && !full,
                 full,
                 waitingCount,
-                queue.getMaxSize(), laneRepository.findAllByQueueIdOrderByPriorityAscMinPartySizeAsc(queue.getId()).stream()
+                queue.getMaxSize(), laneRepository.findAllByQueueIdAndDeletedAtIsNullOrderByPriorityAscMinPartySizeAsc(queue.getId()).stream()
                         .filter(l -> l.isActive()).map(l -> new QueueLaneView(l.getId(), l.getName(), l.getMinPartySize(), l.getMaxPartySize(), l.getPriority(), l.getCapacityMode(), l.getMaxSize(), l.getTimeFactor(), l.isActive())).toList());
     }
 
@@ -221,7 +221,7 @@ public class QueueViewFactory {
     private List<QueueLaneSnapshot> laneSnapshots(ServiceQueue queue, List<QueueEntry> waiting,
                                                    List<QueueEntry> inService, EstimationService.ServiceTimeEstimate base,
                                                    java.util.Map<java.util.UUID, EstimationService.Simulation> simulations) {
-        return laneRepository.findAllByQueueIdOrderByPriorityAscMinPartySizeAsc(queue.getId()).stream().map(lane -> {
+        return laneRepository.findAllByQueueIdAndDeletedAtIsNullOrderByPriorityAscMinPartySizeAsc(queue.getId()).stream().map(lane -> {
             var w = waiting.stream().filter(e -> lane.getId().equals(e.getLane().getId())).toList();
             var s = inService.stream().filter(e -> lane.getId().equals(e.getLane().getId())).toList();
             int used = java.util.stream.Stream.concat(w.stream(), s.stream()).mapToInt(e -> lane.getCapacityMode() == ar.edu.itba.cloud.queue.persistence.entity.LaneCapacityMode.PERSONS ? e.getPartySize() : 1).sum();

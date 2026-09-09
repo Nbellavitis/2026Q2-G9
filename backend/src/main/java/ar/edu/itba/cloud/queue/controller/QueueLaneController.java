@@ -73,7 +73,7 @@ public class QueueLaneController {
         access.requireOwner(user.id(), queue.getEstablishment().getId());
         var lane = lane(laneId);
         requireQueue(lane, queueId);
-        service.delete(lane);
+        service.delete(lane, clock.instant());
         return ResponseEntity.noContent().build();
     }
 
