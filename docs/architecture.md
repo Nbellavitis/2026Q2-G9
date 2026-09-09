@@ -394,6 +394,28 @@ precisely the one the rotation exists to protect.
 `DELETE /queues/{id}` now **archives** rather than destroys: the queue is closed and hidden from
 listings, but its entries, events and notifications survive, so historical metrics stay honest.
 
+`DELETE /queues/{id}/lanes/{laneId}` follows the same principle for the same reason, and for one
+more. `queue_entry.lane_id` is `NOT NULL` and references `queue_lane` with no `ON DELETE` action, so
+every entry a lane has ever held — including customers served last week — pins that row. The guard
+counted only *active* entries, so deleting a lane that had simply been used passed its own check and
+then failed on the foreign key, surfacing as an unmapped 500 for the most ordinary case there is.
+
+It is now a soft delete: `deleted_at` is stamped, `active` is forced false, and the row stays. A
+database `CHECK` enforces that pairing so nothing can leave a retired lane in rotation. Keeping the
+row also keeps what makes the feature measurable afterwards — which band each finished customer was
+served in, and the `time_factor` that governed their estimate. No metric reads it yet; every per-lane
+metric will need it, and it cannot be reconstructed later.
+
+Three things make this safe without touching anything downstream. `QueueLane.accepts()` already
+required `active`, so nobody new is routed into a retired lane. `requeue` never re-resolves a lane,
+so "put back" works for someone whose lane was retired — it only needs the row to exist. And every
+call strategy falls through to an age-ordered pick across all waiting entries, so nobody in a retired
+lane becomes uncallable. Two smaller consequences: name uniqueness became a partial unique index over
+live rows only, because otherwise retiring a lane would burn its name for the lifetime of the queue;
+and every lane finder now excludes deleted rows, with the unfiltered versions *removed* rather than
+left alongside, so reading a retired lane by accident is a compile error rather than a judgement
+call.
+
 ---
 
 ## 7. Concurrency and correctness
@@ -804,7 +826,7 @@ static export described in §12.1.
 
 ## 13. Testing strategy
 
-**58 tests, all passing.** Two tiers, chosen for what each is actually good at:
+**118 tests, all passing.** Two tiers, chosen for what each is actually good at:
 
 | Tier | Tools | Covers |
 |---|---|---|
@@ -945,8 +967,13 @@ public, so reading it needs a staff token.
 | 19 | Reads ask before they lock | Keep the write lock on every path that might expire | Public reads serialised behind the lock staff need, cost WAL like writes, and held pool connections while blocked | Expiry still happens under the lock; only the "nothing to do" decision is lock-free |
 | 20 | `DELETE /queues/{id}` archives | Hard delete | Destroying a queue destroys the history its metrics are computed from | Archived queues are hidden, not gone; storage grows |
 | 21 | Ship the API as a container, moved by `docker save` | Jar under systemd; a registry (ECR) | One artifact that runs identically everywhere, without adding a registry service to justify or credentials on the instance | The CloudFormation user-data still installs a jar — see gotchas |
-| 15 | Injected `Clock` everywhere || 15 | Injected `Clock` everywhere | `Instant.now()` | Makes grace periods, metrics windows and token expiry testable without sleeping | Includes JWT validation |
-| 16 | English throughout | Spanish UI with English code | One language across code, API and interface avoids a translation seam mid-stack | Notification copy is English |
+| 15 | Injected `Clock` everywhere | `Instant.now()` | Makes grace periods, metrics windows and token expiry testable without sleeping | Includes JWT validation |
+| 16 | English in code and API, interface in both languages | Spanish throughout; English throughout | One language across code and API avoids a translation seam mid-stack, but the customer's language is a property of the *customer*, not the deployment | Notification copy is localised from the locale stored on the entry |
+| 22 | Lanes are soft-deleted | Hard delete; `ON DELETE SET NULL`; no delete at all | `queue_entry.lane_id` is NOT NULL and references the lane, so every entry it ever held — including finished ones — pins the row: the old guard counted only *active* entries, passed, and then died on the foreign key as an unmapped 500. Keeping the row also keeps what makes the feature measurable later: which band each finished customer was served in, and the `time_factor` in force at the time. `SET NULL` was rejected because two view-factory call sites dereference the lane unguarded | Name uniqueness became a partial index over live rows; every lane finder excludes deleted rows and the unfiltered ones were removed so reading one is a compile error |
+| 23 | One monotonic ticket orders every write to a live resource | Timestamps; last-write-wins; a revision from the server | Three writers race on the client — first load, explicit refresh, and the stream — and a poll issued while the stream was down could resolve after a newer pushed snapshot and roll the board back. On a queue that looks like a served customer reappearing | A read whose ticket is older than what has been applied is dropped, silently and by design |
+| 24 | A 401 anywhere ends the staff session | Handle it per call site; a refresh token; ignore it | A twelve-hour token expires mid-shift, not between sessions. Ignoring it left the board rendering a stale snapshot of customer names and emails with every action failing and no route back to sign-in | `api.ts` drops the token, which notifies `subscribeToToken`; the same channel plus a `storage` listener makes sign-out reach other tabs |
+| 25 | The join page polls while visible | Leave it static; an SSE stream like every other screen | It is the screen that answers "is this worth the wait?" and the one most likely to be left open while somebody decides, yet it fetched once and never again — a paused or full queue was a permanent dead end until a manual reload. A stream per undecided visitor is a connection the app tier cannot afford; the numbers change on the scale of minutes | One small public read every 15s per open page, suppressed while the tab is hidden and fired immediately on `visibilitychange` |
+| 26 | Interface colours are chosen against a measured contrast floor | Judge them by eye | Four token pairs failed WCAG AA in light mode, `faint` on `raised` at 2.59:1 while carrying every hint and timestamp. A palette that reads well on a designer's screen is not evidence | Fixing `faint` forced `muted` to darken too, or the two tiers would have collapsed; `brand` on `brand-soft` now sits at 4.52:1, with little headroom |
 
 ---
 

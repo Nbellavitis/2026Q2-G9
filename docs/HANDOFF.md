@@ -49,8 +49,8 @@ throughout, and queue lanes (added later by Nicolás Koron — see §6).
 
 | Piece | State |
 |---|---|
-| Backend API | Complete. **113 tests passing** |
-| Frontend SPA | Complete. **No automated tests** — verified by hand |
+| Backend API | Complete. **118 tests passing** |
+| Frontend SPA | Complete, and reviewed end to end for UX/UI/accessibility (see `frontend.md`). **No automated tests** — verified by hand against a running stack |
 | i18n (en/es) | Complete, UI and notification emails |
 | Realtime (SSE + LISTEN/NOTIFY) | Complete, verified across two instances |
 | CloudFormation | Written and validated. **Never actually deployed** |
@@ -137,7 +137,7 @@ docker exec q-postgres psql -U q -d qdb -c "TRUNCATE TABLE notification_record, 
 ### Tests
 
 ```bash
-cd backend && mvn test          # 113 tests; Docker must be running
+cd backend && mvn test          # 118 tests; Docker must be running
 ```
 
 Integration tests use Testcontainers against a real PostgreSQL — the pessimistic locks, CHECK
@@ -341,16 +341,28 @@ exist. Look at recent history for the register.
    `backend/queue-container.service`. Pick one before deploying.
 4. **`docs/domain-model.md`'s lanes section is in Spanish** while the rest of that document is
    English. Harmless, but inconsistent.
+5. **`GlobalExceptionHandler` has no `DataIntegrityViolationException` handler**, so any constraint
+   violation surfaces as a 500 rather than a 409. The two that were reachable through the interface
+   — deleting a used lane, and a duplicate lane name — are now guarded in `QueueLaneService`, but the
+   class of problem is still open.
+6. **`NEXT_PUBLIC_SHOW_DEMO_LOGIN` is unset**, so the sign-in page ships working owner and staff
+   credentials with one-click fill. That is deliberate for the live demo. Build with it set to
+   `false` for any public deployment — this repository is public.
 
 **Deliberate deferrals** (decided, not forgotten):
 
-5. `BackupRetentionPeriod: 0` and `DeletionProtection: false` — correct for a stack rebuilt every
+7. `BackupRetentionPeriod: 0` and `DeletionProtection: false` — correct for a stack rebuilt every
    session, wrong for anything real. One line each.
-6. **CloudWatch** — not yet covered in class. Consequence: with no SSH into the private subnets, a
+8. **CloudWatch** — not yet covered in class. Consequence: with no SSH into the private subnets, a
    failed deployment is opaque. The escape hatch is three lines of user-data copying
    `/var/log/q-bootstrap.log` to the artifacts bucket.
-7. **No frontend test suite.** Playwright against the real stack is the obvious next step.
-8. `GraceSweepJob` runs on every instance — correct because of the per-queue lock, but duplicated
+9. **No frontend test suite.** Playwright against the real stack is the obvious next step. The
+   frontend review was done by hand, so nothing guards the fixes from regressing.
+10. **Nothing reads the lane history that soft delete preserves.** A retired lane keeps which band
+   each finished customer was served in, and its `time_factor`; no metric queries it yet. A per-lane
+   metrics query needs its own explicitly-named repository finder, since every existing lane finder
+   filters deleted rows out on purpose.
+11. `GraceSweepJob` runs on every instance — correct because of the per-queue lock, but duplicated
    work.
 
 ---

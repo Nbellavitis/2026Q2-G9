@@ -114,7 +114,7 @@ curl -s localhost:8080/api/v1/establishments -H "Authorization: Bearer $TOKEN" |
 cd backend && mvn test
 ```
 
-58 tests: unit tests for the estimation and ordering logic, plus integration tests that run the
+118 tests: unit tests for the estimation and ordering logic, plus integration tests that run the
 whole API against a real PostgreSQL through Testcontainers (Docker must be running). The tests drive
 a controllable clock, so grace periods and token expiry are asserted directly rather than by
 sleeping.
