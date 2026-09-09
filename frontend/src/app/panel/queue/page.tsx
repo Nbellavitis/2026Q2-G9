@@ -155,20 +155,23 @@ export default function QueueBoardPage() {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {queue.status === 'OPEN' ? (
-            <Button variant="secondary" size="sm" onClick={() => setQueueStatus('PAUSED')}>
-              {t('board.pause')}
-            </Button>
-          ) : (
-            <Button variant="secondary" size="sm" onClick={() => setQueueStatus('OPEN')}>
-              {closed ? t('board.reopen') : t('board.resume')}
-            </Button>
-          )}
-          {!closed ? (
-            <Button variant="ghost" size="sm" onClick={() => setConfirmClose(true)}>
-              {t('board.close')}
-            </Button>
-          ) : null}
+          {/* Running the queue is done from the sidebar once there is room for one; see below. */}
+          <div className="flex gap-2 xl:hidden">
+            {queue.status === 'OPEN' ? (
+              <Button variant="secondary" size="sm" onClick={() => setQueueStatus('PAUSED')}>
+                {t('board.pause')}
+              </Button>
+            ) : (
+              <Button variant="secondary" size="sm" onClick={() => setQueueStatus('OPEN')}>
+                {closed ? t('board.reopen') : t('board.resume')}
+              </Button>
+            )}
+            {!closed ? (
+              <Button variant="ghost" size="sm" onClick={() => setConfirmClose(true)}>
+                {t('board.close')}
+              </Button>
+            ) : null}
+          </div>
           <ButtonLink href={`/panel/queue/qr?id=${queue.id}`} variant="secondary" size="sm">
             {t('common.qr')}
           </ButtonLink>
@@ -188,7 +191,27 @@ export default function QueueBoardPage() {
       {closed ? <Alert kind="info">{t('board.closedNotice')}</Alert> : null}
       {actionError ? <Alert kind="error">{actionError}</Alert> : null}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {/*
+        A wide screen was showing the same one-column phone layout stretched across it: the operator
+        scrolled past the counts to reach "call next", and scrolled back up to pause the queue. On xl
+        those controls move into a column that stays put while the line scrolls beside it. Below xl
+        nothing changes, and each control appears exactly once at every width.
+      */}
+      <div className="xl:grid xl:grid-cols-[18rem_minmax(0,1fr)] xl:items-start xl:gap-8">
+        <aside className="hidden xl:block">
+          <BoardControlPanel
+            board={board}
+            closed={closed}
+            calling={calling}
+            laneCount={shownLanes.length}
+            onCall={callNext}
+            onStatus={setQueueStatus}
+            onClose={() => setConfirmClose(true)}
+          />
+        </aside>
+
+        <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:hidden">
         <Stat label={t('board.statWaiting')} value={board.waitingCount} emphasis />
         <Stat label={t('board.statBeingServed')} value={board.inServiceCount} />
         <Stat
@@ -199,12 +222,19 @@ export default function QueueBoardPage() {
         <Stat label={t('board.activeLanes')} value={activeLanes.length} />
       </div>
 
-      <Button size="lg" block onClick={callNext} loading={calling} disabled={closed || board.waitingCount === 0}>
+      <Button
+        className="xl:hidden"
+        size="lg"
+        block
+        onClick={callNext}
+        loading={calling}
+        disabled={closed || board.waitingCount === 0}
+      >
         {board.waitingCount === 0 ? t('board.nobodyWaiting') : t('board.callNext')}
       </Button>
 
       {shownLanes.length > 1 ? (
-        <div className="grid items-start gap-4 md:grid-cols-2">
+        <div className={cx('grid items-start gap-4 md:grid-cols-2', shownLanes.length > 2 && 'xl:grid-cols-3')}>
           {shownLanes.map((lane) => (
             <Card
               key={lane.lane.id}
@@ -358,6 +388,8 @@ export default function QueueBoardPage() {
           </ul>
         ) : null}
       </section>
+        </div>
+      </div>
 
       <ConfirmDialog
         open={pendingStatus !== null}
@@ -408,6 +440,75 @@ export default function QueueBoardPage() {
         onCancel={() => setConfirmClose(false)}
       />
     </div>
+  )
+}
+
+/**
+ * The wide-screen control column: the counts that answer "how busy am I", the one button pressed
+ * most often, and the two that change the queue's state.
+ *
+ * <p>`sticky top-24` rather than `top-0`: the staff header is sticky and 64px tall, so a panel
+ * pinned to the top of the viewport would slide underneath it.
+ *
+ * <p>Everything here also exists in the flow above, hidden from xl up. That duplication is the
+ * price of one layout serving a phone at the host stand and a monitor in the back office; the
+ * alternative is rendering the controls once and moving them with CSS, which loses the DOM order
+ * that a screen reader and the tab sequence follow.
+ */
+function BoardControlPanel({
+  board,
+  closed,
+  calling,
+  laneCount,
+  onCall,
+  onStatus,
+  onClose,
+}: {
+  board: QueueSnapshot
+  closed: boolean
+  calling: boolean
+  laneCount: number
+  onCall: () => void
+  onStatus: (status: QueueStatus) => void
+  onClose: () => void
+}) {
+  const { t } = useI18n()
+  const { queue } = board
+
+  return (
+    <Card className="sticky top-24 space-y-5">
+      <div className="grid grid-cols-2 gap-3">
+        <Stat label={t('board.statWaiting')} value={board.waitingCount} emphasis />
+        <Stat label={t('board.statBeingServed')} value={board.inServiceCount} />
+        <Stat
+          label={t('board.statAverageService')}
+          value={t('board.minutesUnit', { count: board.averageServiceMinutes })}
+          hint={board.usingDefaultServiceTime ? t('board.configuredEstimate') : t('board.measured')}
+        />
+        <Stat label={t('board.activeLanes')} value={laneCount} />
+      </div>
+
+      <Button size="lg" block onClick={onCall} loading={calling} disabled={closed || board.waitingCount === 0}>
+        {board.waitingCount === 0 ? t('board.nobodyWaiting') : t('board.callNext')}
+      </Button>
+
+      <div className="flex flex-col gap-2 border-t border-line pt-4">
+        {queue.status === 'OPEN' ? (
+          <Button variant="secondary" size="sm" block onClick={() => onStatus('PAUSED')}>
+            {t('board.pause')}
+          </Button>
+        ) : (
+          <Button variant="secondary" size="sm" block onClick={() => onStatus('OPEN')}>
+            {closed ? t('board.reopen') : t('board.resume')}
+          </Button>
+        )}
+        {!closed ? (
+          <Button variant="ghost" size="sm" block onClick={onClose}>
+            {t('board.close')}
+          </Button>
+        ) : null}
+      </div>
+    </Card>
   )
 }
 

@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth'
 import { useI18n } from '@/lib/i18n'
 import { errorMessage, formatMinutes, formatPercent, queueStatusLabel, queueStatusTone } from '@/lib/format'
 import type { MetricsView, QueueSnapshot, QueueView } from '@/lib/types'
+import { ActionMenu } from '@/components/ActionMenu'
 import { Alert } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'
 import { Button, ButtonLink } from '@/components/ui/Button'
@@ -170,7 +171,7 @@ export default function PanelHomePage() {
             }
           />
         ) : (
-          <div className="grid items-start gap-4 md:grid-cols-2">
+          <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
             {queues.map((queue) => (
               <QueueCard key={queue.id} queue={queue} board={boards[queue.id]} />
             ))}
@@ -209,16 +210,22 @@ function QueueCard({ queue, board }: { queue: QueueView; board: QueueSnapshot | 
         </div>
       </div>
 
-      <div className="mt-6 flex flex-wrap gap-2">
+      {/*
+        Three side-by-side buttons wrap onto two lines once the grid narrows to a third of the
+        width, which reads as three equal choices when only one of them is the common one. The
+        secondary two move behind a menu; they stay anchors inside it.
+      */}
+      <div className="mt-6 flex items-center gap-2">
         <ButtonLink href={`/panel/queue?id=${queue.id}`} size="sm" className="flex-1">
           {t('panel.openBoard')}
         </ButtonLink>
-        <ButtonLink href={`/panel/queue/qr?id=${queue.id}`} variant="secondary" size="sm">
-          {t('common.qr')}
-        </ButtonLink>
-        <ButtonLink href={`/panel/queue/settings?id=${queue.id}`} variant="secondary" size="sm">
-          {t('common.settings')}
-        </ButtonLink>
+        <ActionMenu
+          label={t('common.moreActions')}
+          items={[
+            { label: t('common.qr'), href: `/panel/queue/qr?id=${queue.id}` },
+            { label: t('common.settings'), href: `/panel/queue/settings?id=${queue.id}` },
+          ]}
+        />
       </div>
     </Card>
   )

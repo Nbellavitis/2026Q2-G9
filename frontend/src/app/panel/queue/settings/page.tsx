@@ -209,7 +209,37 @@ export default function QueueSettingsPage() {
   if (!queue) return error ? <Alert kind="error">{error}</Alert> : <PageLoader label={t('settings.loading')} />
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    /*
+      The form column stays narrow on purpose - a settings form is easier to read at 42rem than
+      stretched across a monitor. What the extra width buys is not a wider form but a place to stand:
+      seven long cards meant scrolling to find the one you came for.
+    */
+    <div className="mx-auto max-w-7xl">
+      <div className="xl:grid xl:grid-cols-[15rem_minmax(0,42rem)] xl:items-start xl:justify-center xl:gap-10">
+        <aside className="hidden xl:block">
+          <nav aria-label={t('settings.title')} className="sticky top-24 space-y-1 text-sm">
+            {(
+              [
+                ['strategy', 'lanes.strategyTitle'],
+                ['basics', 'settings.basics'],
+                ['lanes', 'lanes.title'],
+                ['waiting-times', 'settings.waitingTimes'],
+                ['no-shows', 'settings.noShowTitle'],
+                ['notifications', 'settings.notifications'],
+              ] as const
+            ).map(([id, key]) => (
+              <a
+                key={id}
+                href={`#${id}`}
+                className="block truncate rounded-lg px-3 py-2 text-muted transition-colors hover:bg-raised hover:text-ink"
+              >
+                {t(key)}
+              </a>
+            ))}
+          </nav>
+        </aside>
+
+        <div className="max-w-2xl space-y-6">
       <header>
         <Link href={`/panel/queue?id=${queue.id}`} className="text-sm text-muted hover:text-ink">
           ← {t('settings.backToBoard')}
@@ -223,6 +253,7 @@ export default function QueueSettingsPage() {
       ) : null}
 
       <div className="space-y-6">
+        <section id="strategy" className="scroll-mt-24">
         <Card>
           <CardHeader title={t('lanes.strategyTitle')} description={t('lanes.strategyHint')} />
           <SelectField
@@ -239,7 +270,9 @@ export default function QueueSettingsPage() {
             <option value="ROUND_ROBIN">{t('lanes.strategyRoundRobin')}</option>
           </SelectField>
         </Card>
+        </section>
 
+        <section id="basics" className="scroll-mt-24">
         <Card>
           <CardHeader title={t('settings.basics')} />
           <div className="space-y-4">
@@ -253,7 +286,9 @@ export default function QueueSettingsPage() {
             />
           </div>
         </Card>
+        </section>
 
+        <section id="lanes" className="scroll-mt-24">
         <Card>
           <CardHeader title={t('lanes.title')} description={t('lanes.hint')} />
           <p className="mb-4 rounded-lg bg-raised px-3 py-2 text-xs text-muted">
@@ -377,7 +412,9 @@ export default function QueueSettingsPage() {
             </form>
           </div>
         </Card>
+        </section>
 
+        <section id="waiting-times" className="scroll-mt-24">
         <Card>
           <CardHeader
             title={t('settings.waitingTimes')}
@@ -413,7 +450,9 @@ export default function QueueSettingsPage() {
             />
           </div>
         </Card>
+        </section>
 
+        <section id="no-shows" className="scroll-mt-24">
         <Card>
           <CardHeader
             title={t('settings.noShowTitle')}
@@ -456,7 +495,9 @@ export default function QueueSettingsPage() {
             ) : null}
           </div>
         </Card>
+        </section>
 
+        <section id="notifications" className="scroll-mt-24">
         <Card>
           <CardHeader
             title={t('settings.notifications')}
@@ -483,6 +524,7 @@ export default function QueueSettingsPage() {
             />
           </div>
         </Card>
+        </section>
 
         {error ? <Alert kind="error">{error}</Alert> : null}
         {saved ? <Alert kind="success">{t('settings.saved')}</Alert> : null}
@@ -509,6 +551,8 @@ export default function QueueSettingsPage() {
           </Button>
         </Card>
       ) : null}
+        </div>
+      </div>
 
       <ConfirmDialog
         open={confirmDelete}
