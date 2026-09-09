@@ -31,10 +31,19 @@
   --color-line: #ebe1d6;
   --color-line-strong: #ddcfc0;
 
-  /* Terracotta carries every primary action and the customer's own position. */
-  --color-brand: #a45432;
-  --color-brand-hover: #8c4728;
-  --color-brand-soft: #f8e8de;
+  /*
+   * Terracotta carries every primary action and the customer's own position.
+   *
+   * Contrast is a function of luminance, not saturation, so chroma is nearly free: this is the same
+   * hue at full saturation and the same measured ratios as the muted #a45432 it replaces - 4.80 as
+   * text on `raised`, 5.20 under the button label. It reads as the warm terracotta the product is
+   * meant to have instead of a brown, and gives up nothing to get there. `brand-soft` moved with it
+   * for the same reason: at 14% saturation it is a more definite tint than the old 11%, and holds
+   * badge text at 4.60 rather than 4.52.
+   */
+  --color-brand: #c23a00;
+  --color-brand-hover: #ab3300;
+  --color-brand-soft: #ffe9db;
   --color-on-brand: #fffaf6;
 
   /* Sage means "settled": served, open, healthy. */
@@ -61,12 +70,18 @@
     --color-raised: #302620;
     --color-ink: #f4ece3;
     --color-muted: #ac9c90;
-    --color-faint: #8a7a6e;
+    /*
+     * The light palette was corrected for contrast; this one had the identical defect left in it.
+     * `faint` was #8a7a6e, which measured 4.06 on `surface` and 3.57 on `raised` - the same token
+     * carrying the same hints and timestamps, failing on two of the three grounds it lands on.
+     */
+    --color-faint: #a18e80;
     --color-line: #3a2e26;
     --color-line-strong: #4f3f35;
 
-    --color-brand: #e08055;
-    --color-brand-hover: #ee9067;
+    /* Saturated to match the light theme, at luminance parity: the ratios are unchanged. */
+    --color-brand: #f57338;
+    --color-brand-hover: #ff8954;
     --color-brand-soft: #3a2419;
     --color-on-brand: #1a1009;
 
