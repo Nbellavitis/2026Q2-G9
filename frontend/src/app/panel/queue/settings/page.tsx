@@ -503,8 +503,15 @@ export default function QueueSettingsPage() {
             title={t('settings.notifications')}
             description={t('settings.notificationsHint')}
           />
-          <div className="grid gap-4 sm:grid-cols-2">
+          {/*
+            Subgrid, so the two inputs sit on the same line whatever the labels say. Side by side
+            they are separate grid items, so a label that wraps to two lines pushes its own input
+            down and the pair reads as broken. Copy length is not something to rely on here: these
+            strings are translated, and the English label is longer than the Spanish one.
+          */}
+          <div className="grid gap-4 sm:grid-cols-2 sm:grid-rows-[auto_auto_auto] sm:gap-y-0">
             <Field
+              className="sm:row-span-3 sm:grid sm:grid-rows-subgrid"
               label={t('settings.notifyPosition')}
               optional
               type="number"
@@ -514,6 +521,7 @@ export default function QueueSettingsPage() {
               hint={t('settings.notifyPositionHint')}
             />
             <Field
+              className="sm:row-span-3 sm:grid sm:grid-rows-subgrid"
               label={t('settings.notifyMinutes')}
               optional
               type="number"
