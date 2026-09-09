@@ -6,11 +6,10 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { errorMessage } from '@/lib/format'
 import { useAuth } from '@/lib/auth'
 import { useI18n } from '@/lib/i18n'
-import { LanguageSwitcher } from '@/components/LanguageSwitcher'
+import { AuthShell } from '@/components/AuthShell'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Field } from '@/components/ui/Field'
-import { Logo } from '@/components/Logo'
 
 /*
  * Working credentials for the seeded accounts, with one-click fill. They exist for the live demo
@@ -53,14 +52,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center px-5 py-12">
-      <div className="mb-8 flex items-center justify-between">
-        <Link href="/">
-          <Logo />
-        </Link>
-        <LanguageSwitcher />
-      </div>
-
+    <AuthShell>
       <h1 className="font-display text-3xl font-semibold tracking-tight">{t('common.signIn')}</h1>
       <p className="mt-2 text-muted">{t('auth.signInSubtitle')}</p>
 
@@ -119,6 +111,6 @@ export default function LoginPage() {
           {t('auth.createOne')}
         </Link>
       </p>
-    </main>
+    </AuthShell>
   )
 }
