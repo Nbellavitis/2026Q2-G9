@@ -58,6 +58,7 @@ fijos de nuestra cuenta, pasos manuales fuera del README y cualquier recurso que
 | Canales de aviso | **Solo SES** | Sin Web Push: sin service worker ni claves VAPID. En el sandbox de SES los emails llegan solo a direcciones verificadas, alcanza con las del grupo |
 | Origen del PR | **Una rama en el repositorio de la cátedra** | Ahí se cargan los secrets, y el workflow del PR los recibe. Desde un fork no los recibiría |
 | Punto de control | **No hay** | Se va con serverless hasta el final. El riesgo se maneja con el orden de las fases y la lista de recortes |
+| Lenguaje de las funciones | **TypeScript sobre Node 22**, todo en `functions/` | Arranques en frío de ~200 ms sin SnapStart, un solo lenguaje para las Lambdas y el frontend, y bundles de pocos KB con esbuild. El dominio se porta desde Java en lugar de extraerse a un módulo Maven; `backend/` queda solo como referencia hasta la Fase 6 |
 
 Con Cognito y SES **no queda ningún secreto que guardar**: DynamoDB, SES, SNS y SQS se autentican con
 IAM. Secrets Manager sale del diseño.
@@ -78,6 +79,9 @@ IAM. Secrets Manager sale del diseño.
 | 6 | CloudFront figura como **bloqueado por el lab**, no como decisión del equipo | Es lo que pasó en el TP2, y es mejor argumento |
 | 7 | Un recurso de API Gateway **por página** del sitio, más `binaryMediaTypes` | Con `trailingSlash: true`, `/login/` es `login/index.html`, y la integración con S3 no agrega `index.html` sola. Sin `binaryMediaTypes`, las fuentes y las imágenes llegan rotas |
 | 8 | **Cognito en lugar de la autenticación propia**, y **sin Web Push** | [Decisiones tomadas](#decisiones-tomadas) |
+| 9 | **Funciones en TypeScript, sin SnapStart ni alias.** Donde el documento dice "Java + SnapStart" o módulos Maven (`q-domain`, `q-dynamo`, `q-fn-*`), vale `functions/src/domain`, `functions/src/persistence` y un handler por función en `functions/src/handlers` | [Decisiones tomadas](#decisiones-tomadas) |
+| 10 | **`λ lifecycle` libera en lotes de 24, no de 30.** Cada entrada liberada escribe cuatro ítems (borrar el SK viejo, escribir el nuevo, actualizar su referencia y su evento), y 24 × 4 + la cola = 97 entra en una transacción; 30 no entraba | Medido en la Fase 2 |
+| 11 | **Sin `activeCount` en `META`.** Cada mutación ya lee todas las entradas activas de la cola, así que la capacidad se cuenta sobre lo leído, bajo la misma versión. Un contador más sería un dato duplicado que puede desincronizarse | Fase 2 |
 
 ---
 
@@ -94,7 +98,7 @@ Cada uno con la estructura de la clase 10: `main.tf`, `variables.tf`, `outputs.t
 | Módulo | Qué encapsula | Se usa para |
 |---|---|---|
 | `private-bucket` | Bucket con bloqueo de acceso público, versionado, política que exige TLS, logs de acceso y expiración opcional | `spa`, `artefactos`, `logs` |
-| `lambda-function` | Función con `LabRole`, alias `live`, log group con retención, SnapStart opcional y variables de entorno | Las 7 funciones |
+| `lambda-function` | Función Node con `LabRole`, log group con retención, zip versionado en el bucket de artefactos y variables de entorno | Las 7 funciones |
 | `queue-with-dlq` | Cola SQS (standard o FIFO) con su DLQ, la política de redrive y la alarma de profundidad > 0 | `q-push`, `q-notifications`, `q-lifecycle` |
 
 `queue-with-dlq` es el que mejor muestra DRY: sin él, cada cola son cuatro recursos repetidos tres
@@ -193,34 +197,38 @@ y la prueba de humo pasa; y la etiqueta `destroy` deja la cuenta limpia.
 
 ## Fase 2 · Dominio y persistencia en DynamoDB
 
-Puede empezar en paralelo con la Fase 1.
+Puede empezar en paralelo con la Fase 1. **En TypeScript**, dentro de `functions/` (decisión de
+[lenguaje](#decisiones-tomadas)).
 
-### Separar el dominio de Spring
+### Portar el dominio
 
-- [ ] Convertir `backend/` en un proyecto Maven multimódulo, como en §4.5 del documento, sin los
-      módulos de autenticación propia.
-- [ ] Mover a `q-domain` la lógica pura que hoy está en `service/`: `QueueOrdering`,
-      `QueueEntrySelector`, `EstimationService`, las políticas de no-show, el cálculo de métricas y
-      las vistas. **Sin Spring, sin JPA y sin AWS.**
-- [ ] Reemplazar los enteros separados de a 1000 por **claves de orden fraccionarias**.
-- [ ] Llevar los tests de esas clases a `q-domain`. Son unitarios: no necesitan base.
+- [x] `functions/src/domain/`: la lógica pura que hoy está en `backend/.../service/`, **sin AWS**:
+      orden de la fila, selector de llamado, carriles, estimación, gracia y políticas de ausencia,
+      operaciones sobre entradas, configuración de colas, métricas, avisos debidos y vistas.
+- [x] **Claves de orden fraccionarias** en lugar de enteros separados de a 1000: la renormalización
+      desaparece.
+- [x] Portar los tests de `QueueOrderingTest`, `QueueEntrySelectorTest`, `EstimationServiceTest` y
+      `EntryStatusTest`, más los de las operaciones y las cuatro políticas de ausencia. Son unitarios
+      (vitest): no necesitan base.
 
 ### Persistencia
 
-- [ ] Terraform: `q-main` (on-demand, Streams `NEW_AND_OLD_IMAGES`, PITR) y `q-connections`
-      (GSI `byQueue`, TTL), con el módulo externo.
-- [ ] `q-dynamo`: repositorios con el Enhanced Client del SDK v2, según el modelo de §5.1, **sin**
-      los ítems `USER#/PROFILE` ni `EMAIL#`: los usuarios viven en Cognito. Las membresías se guardan
-      por el `sub` de Cognito.
-- [ ] Control optimista con `version` en `META`, reintentos con backoff y jitter, y `409` al
-      agotarlos (§6.1).
-- [ ] El ítem de evento dentro de cada transacción (§6.2).
-- [ ] Ítems de búsqueda `TICKET#` y `USER#/EST#`, leídos con lectura fuerte.
-- [ ] Tests de integración con **DynamoDB Local** en Testcontainers. Tienen que cubrir las cuatro
-      carreras de §6.1, en particular dos personas del staff llamando a la vez.
+- [x] Terraform: `q-main` (ya estaba desde la Fase 1) y `q-connections` (GSI `byQueue`, TTL), las dos
+      con el módulo externo.
+- [x] `functions/src/persistence/`: el modelo de §5.1 con el cliente de documentos del SDK v3,
+      **sin** los ítems `USER#/PROFILE` ni `EMAIL#`: los usuarios viven en Cognito. Las membresías se
+      guardan por el `sub` de Cognito.
+- [x] Control optimista con `version` en `META`, reintentos con backoff y jitter, y `409
+      CONCURRENT_MODIFICATION` al agotarlos (§6.1).
+- [x] El ítem de evento dentro de cada transacción (§6.2).
+- [x] Ítems de búsqueda `TICKET#`, `ENTRY#/REF` y `USER#/EST#`, leídos con lectura fuerte.
+- [x] Tests de integración con **DynamoDB Local** en Testcontainers, que cubren las cuatro carreras
+      de §6.1 (dos y tres personas del staff llamando a la vez, dos joins a la vez, un join por el
+      último lugar, y la gracia venciendo mientras el staff atiende).
+- [x] Los tests corren en el job `build` del pipeline: si una carrera se rompe, no se despliega.
 
-**Listo cuando:** `q-domain` compila solo, las operaciones corren contra DynamoDB Local y las
-carreras están cubiertas por tests.
+**Listo cuando:** el dominio compila solo, las operaciones corren contra DynamoDB Local y las
+carreras están cubiertas por tests. **Cumplido**: ver [AVANCE-ENTREGA-3.md](AVANCE-ENTREGA-3.md).
 
 ---
 
@@ -228,8 +236,8 @@ carreras están cubiertas por tests.
 
 - [ ] Terraform: user pool de Cognito con verificación de email y su cliente (sin secreto de
       cliente, porque lo usa el navegador).
-- [ ] Handlers `q-fn-public` y `q-fn-staff`, sin Spring, con inyección manual de dependencias.
-      `staff` toma el usuario del token que ya validó API Gateway.
+- [ ] Handlers `functions/src/handlers/public.ts` y `staff.ts` sobre `QueueStore` y
+      `DirectoryStore`. `staff` toma el usuario (`sub`) del token que ya validó API Gateway.
 - [ ] Terraform: rutas de la API REST.
   - `/api/v1/public/*` → `λ public`, sin authorizer.
   - `/api/v1/*` → `λ staff`, con el **authorizer de Cognito**.
@@ -280,8 +288,8 @@ siempre termina en la DLQ y dispara la alarma.
 - [ ] `λ notifier`: deduplica con `NOTIF#type#cycle` y envía por SES en el idioma del cliente. Un
       rechazo por destinatario no verificado se registra como envío simulado y no se reintenta.
 - [ ] SES: la identidad del remitente en Terraform, y los emails del grupo verificados para probar.
-- [ ] `λ lifecycle`: vencimiento de gracia con condición sobre `status` y `cycle`, y cierre de
-      colas en lotes de 30.
+- [ ] `λ lifecycle`: vencimiento de gracia (`expireDue` sobre `QueueStore.mutate`) y cierre de
+      colas en lotes de `RELEASE_BATCH_SIZE` (24), con `releaseBatch` hasta que devuelva 0.
 - [ ] Frontend: `useLiveResource` pasa de SSE a WebSocket y conserva la carga inicial por REST y el
       polling de respaldo.
 
@@ -292,7 +300,8 @@ sin que nadie mire la cola, y llegan los emails a direcciones verificadas.
 
 ## Fase 6 · Retirar lo anterior
 
-- [ ] Sacar Spring Boot, JPA, Flyway, PostgreSQL y la autenticación propia del backend.
+- [ ] Borrar `backend/` entero (Spring Boot, JPA, Flyway, PostgreSQL, la autenticación propia y sus
+      tests): el dominio ya vive en `functions/src/domain` con sus tests portados.
 - [ ] Sacar el `Dockerfile` del backend y el servicio de systemd.
 - [ ] Reemplazar `docker-compose.yml` por DynamoDB Local para desarrollo.
 - [ ] Borrar el `app.env` del bucket de artefactos del TP2 y **revocar la contraseña de aplicación de
@@ -370,10 +379,11 @@ Es el 10 % de la nota y lo primero que ve quien abre el repositorio.
 No hay un plan B de arquitectura, así que esta lista es la red de seguridad. En este orden, de lo
 primero que se recorta a lo último:
 
-1. SnapStart (Java con más memoria).
-2. El límite por IP en `λ public` (queda el *throttling* de API Gateway).
-3. El WebSocket: las pantallas quedan al día con el polling de respaldo, y se ahorran
+1. El límite por IP en `λ public` (queda el *throttling* de API Gateway).
+2. El WebSocket: las pantallas quedan al día con el polling de respaldo, y se ahorran
    `ws-connections`, `broadcaster`, `q-push` y la API WebSocket.
+
+SnapStart ya no está en la lista: con las funciones en TypeScript no hace falta.
 
 **Lo que no se recorta:** el pipeline, los módulos, las correcciones del TP2, el README y que la
 cátedra pueda correrlo.

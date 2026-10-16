@@ -6,7 +6,7 @@ fase anota qué se construyó, qué se decidió en el camino y por qué, qué se
 | Fase | Estado |
 |---|---|
 | 1 · Esqueleto que camina: Terraform y pipeline | **Código completo y verificado localmente. Falta correrlo en el lab.** |
-| 2 · Dominio y persistencia en DynamoDB | Pendiente |
+| 2 · Dominio y persistencia en DynamoDB | **Completa y verificada localmente** (82 tests, DynamoDB Local). La tabla `q-connections` falta crearla en el lab |
 | 3 · API síncrona y Cognito | Pendiente |
 | 4 · Bus de eventos | Pendiente |
 | 5 · Consumidores y tiempo real | Pendiente |
@@ -144,7 +144,7 @@ en la ejecución, y revisar el resumen con las URLs. Para limpiar la cuenta, agr
 | Criterio | Dónde |
 |---|---|
 | Módulos propios | `private-bucket` ×3 (`storage.tf`), `lambda-function` ×1 (`functions.tf`); cada uno con `README.md`, `versions.tf`, variables tipadas y validadas |
-| Módulo externo | `terraform-aws-modules/dynamodb-table/aws` 5.5.2 (`tables.tf`) |
+| Módulo externo | `terraform-aws-modules/dynamodb-table/aws` 5.5.2 (`tables.tf`), usado dos veces desde la Fase 2: `q-main` y `q-connections` |
 | `for_each` | `module.private_buckets`, `module.functions`, `aws_s3_object.site`, métodos, integraciones y respuestas del sitio (`api.tf`) |
 | `count` | Versionado, expiración y registros de acceso opcionales dentro de `private-bucket` |
 | `depends_on` | `module.private_buckets` → bucket de logs (`storage.tf`); política → bloqueo público (`private-bucket`); función → log group (`lambda-function`); output `name` → versionado y política (`private-bucket`); respuestas de integración → integraciones (`api.tf`). Cada uno con el motivo escrito al lado |
@@ -153,3 +153,105 @@ en la ejecución, y revisar el resumen con las URLs. Para limpiar la cuenta, agr
 | Locals | Sufijo de nombres, tags, mapa de buckets, mapa de funciones, tipos MIME, objetos del sitio, rutas del sitio y sus respuestas (`locals.tf`) |
 | Datasources | `aws_caller_identity`, `aws_region`, `aws_iam_role` (`data.tf`); `aws_iam_policy_document` (`data.tf` y `private-bucket`); `archive_file` (`lambda-function`) |
 | Calidad | `fmt`, `validate` y `tflint` en el pipeline; variables con `description` y `validation`; outputs con `description`; nada escrito a mano; un archivo por área |
+
+---
+
+## Fase 2 · Dominio y persistencia en DynamoDB
+
+### Decisión previa: TypeScript en lugar de Java
+
+El ROADMAP planeaba un proyecto Maven multimódulo (`q-domain`, `q-dynamo`, `q-fn-*`), pero la Fase 1
+ya había puesto las Lambdas en TypeScript. Mantener dos lenguajes en las funciones no tenía sentido,
+así que el dominio **se portó** de Java a TypeScript en lugar de extraerse. El ROADMAP quedó
+actualizado (decisión "Lenguaje de las funciones" y ajustes 9 a 11).
+
+### Qué se construyó
+
+```
+functions/
+  src/domain/                lógica pura, sin AWS
+    types.ts                 modelo: cola, carril, entrada, evento, aviso
+    errors.ts                DomainError con los mismos `code` estables que la API Java
+    ordering.ts              claves de orden fraccionarias
+    lanes.ts                 elección de carril, capacidad, rangos anidados
+    selector.ts              GLOBAL_AGE, LANE_PRIORITY, ROUND_ROBIN
+    estimation.ts            promedio de servicio y simulación de puestos
+    state.ts                 Session: estado leído + registro de lo que cambió + eventos
+    grace.ts                 vencimiento y las cuatro políticas de ausencia
+    entries.ts               join, leave, llamados, atender, ausente, cancelar, volver, liberar
+    queues.ts                configuración, estado, archivo y carriles
+    metrics.ts               ventana por día local y métricas
+    notifications.ts         qué avisos corresponden (para λ notifier)
+    views.ts                 TicketView y EntryView con la forma de la API Java
+  src/persistence/
+    keys.ts                  todas las claves de q-main en un archivo
+    items.ts                 dominio ↔ ítems
+    client.ts                cliente de documentos (DynamoDB Local si hay DYNAMODB_ENDPOINT)
+    queue-store.ts           carga consistente, transacción con versión, reintentos
+    directory-store.ts       establecimientos, membresías, avisos, límite por IP
+  test/domain/               64 tests unitarios (vitest)
+  test/integration/          18 tests contra DynamoDB Local (Testcontainers)
+  vitest.config.ts           proyectos `unit` e `integration`
+infra/terraform/tables.tf    + q-connections, con el mismo módulo externo
+.github/workflows/terraform.yml  + `npm test` en el job build
+```
+
+### Cómo funciona una mutación
+
+1. `QueueStore.mutate(queueId, operación)` lee la cola con lecturas fuertes: `META` y los carriles
+   en un rango (`LANE#…` a `META`), y las entradas activas en dos consultas por prefijo (`A#`, `W#`).
+2. La operación del dominio recibe una `Session`, modifica el estado en memoria y anota qué tocó y
+   qué eventos produjo. No sabe nada de DynamoDB.
+3. `commit` arma **una** transacción: `META` con `version = leída + 1` y la condición
+   `version = leída`; cada entrada que cambió de estado se mueve (Delete del SK viejo, Put del
+   nuevo, Update de su `ENTRY#/REF`); los carriles tocados; la fila del listado si cambió el nombre o
+   el estado; y un ítem `QUEUE#…#EV` por evento.
+4. Si la condición de `META` falla (u otra transacción tocaba los mismos ítems), se relee y se vuelve a
+   correr la operación, con backoff exponencial y jitter, hasta 5 veces; después, `409
+   CONCURRENT_MODIFICATION`.
+
+### Decisiones que se apartan del documento
+
+1. **Claves de fin por secuencia, claves del medio por punto medio.** Entrar al final usa la
+   secuencia de la cola en base 62 con ancho fijo (8 caracteres + sufijo); solo `MOVE_BACK` usa el
+   punto medio. Así las claves no crecen con la cantidad de joins: con el punto medio puro, cada
+   entrada al final alarga la clave cada pocas inserciones, y mil joins darían claves de cientos de
+   caracteres.
+2. **`ENTRY#<id>/REF` además de `TICKET#`.** El staff opera por id de entrada, y una entrada
+   terminada (para volver a ponerla en la fila) solo se encuentra si se conoce su SK actual. La
+   referencia guarda el SK y se actualiza en la misma transacción cada vez que la entrada se mueve.
+   `TICKET#` es inmutable.
+3. **Sin `activeCount` en `META`** (ajuste 11 del ROADMAP).
+4. **Lotes de 24 al cerrar una cola, no de 30** (ajuste 10). Lo detectó el test de integración: 30
+   entradas escriben 121 ítems.
+5. **El evento lleva la versión y un índice en el SK** (`<versión>#<índice>#<id>`), porque una sola
+   transacción puede producir varios (vencer una gracia y llamar, por ejemplo) y tienen que quedar en
+   orden.
+6. **Qué avisos corresponden lo decide `notifications.ts` sobre el estado actual**, no la transacción
+   del staff (§6.5): la Fase 5 solo tiene que llamarla.
+7. **`DomainError` conserva los códigos de la API Java** (`QUEUE_FULL`, `INVALID_TRANSITION`, …), así
+   el frontend no cambia su manejo de errores en la Fase 3.
+
+### Verificado localmente
+
+| Qué | Resultado |
+|---|---|
+| `npm run typecheck` | Sin errores (incluye los tests) |
+| `npm run test:unit` | 64 tests: orden, selector, estimación, operaciones, las cuatro políticas, carriles, métricas por zona horaria, avisos |
+| `npm run test:integration` | 18 tests contra DynamoDB Local 3.3.1: ciclo completo, mover SK y referencia, eventos en la transacción, vencimiento al leer, cierre en lotes, rechazo de transacciones de más de 100 ítems, membresías, deduplicación de avisos y límite por IP |
+| Carreras de §6.1 | 5 tests (dos y tres llamados simultáneos, dos joins, último lugar, gracia contra staff). Una barrera fuerza que todos lean la misma versión antes de escribir. Corridos 4 veces seguidas sin fallas |
+| `npm run build` | Sin cambios: el dominio todavía no lo usa ningún handler |
+| Terraform `fmt`, `validate` y `tflint` | Sin errores (con las versiones del pipeline, en Docker) |
+
+### Sin verificar: necesita el lab
+
+| Qué | Cómo se nota |
+|---|---|
+| Crear `q-connections` con `LabRole` | El `apply` falla con `AccessDenied` en DynamoDB |
+| Que el job `build` corra Testcontainers en GitHub Actions | El paso "Tests de las funciones" falla al levantar el contenedor; el runner `ubuntu-latest` trae Docker, así que no debería |
+
+### Falta para la Fase 3
+
+- Los handlers `public` y `staff` sobre `QueueStore` y `DirectoryStore`, y sus rutas en API Gateway.
+- La creación de colas desde la API (`QueueStore.create` + `newQueueState` ya existen).
+- La traducción de `DomainError` a RFC 7807 en la respuesta HTTP.

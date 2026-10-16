@@ -9,7 +9,10 @@
   },
   "scripts": {
     "build": "node build.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "3.1144.0",
@@ -17,6 +20,8 @@
     "@types/aws-lambda": "8.10.164",
     "@types/node": "22.20.4",
     "esbuild": "0.28.2",
-    "typescript": "5.9.3"
+    "testcontainers": "12.2.0",
+    "typescript": "5.9.3",
+    "vitest": "5.0.3"
   }
 }

@@ -27,3 +27,37 @@ module "main_table" {
   # La cátedra tiene que poder destruir todo.
   deletion_protection_enabled = false
 }
+
+# Las conexiones WebSocket (§5.3): una por navegador abierto, indexadas por la cola que miran. El
+# broadcaster de la Fase 5 hace una sola consulta al índice `byQueue` para encontrar a todos los que
+# hay que avisar. El índice es eventualmente consistente a propósito: la primera vista de cada
+# pantalla llega por REST, así que perderse el primer push no deja a nadie desactualizado.
+#
+# El TTL limpia las conexiones cuyo $disconnect nunca llegó. Puede tardar, pero acá no importa: el
+# broadcaster también borra una conexión cuando API Gateway responde 410.
+module "connections_table" {
+  source  = "terraform-aws-modules/dynamodb-table/aws"
+  version = "5.5.2"
+
+  name         = format("%s-connections", var.project)
+  hash_key     = "PK"
+  billing_mode = "PAY_PER_REQUEST"
+
+  attributes = [
+    { name = "PK", type = "S" },
+    { name = "queueId", type = "S" },
+  ]
+
+  global_secondary_indexes = [
+    {
+      name            = "byQueue"
+      hash_key        = "queueId"
+      projection_type = "ALL"
+    },
+  ]
+
+  ttl_enabled        = true
+  ttl_attribute_name = "ttl"
+
+  deletion_protection_enabled = false
+}

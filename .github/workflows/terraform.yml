@@ -103,6 +103,13 @@ jobs:
           npm run typecheck
           npm run build
 
+      # Los unitarios del dominio y los de integración contra DynamoDB Local (Testcontainers usa el
+      # Docker que ya trae el runner). Incluyen las carreras del control optimista: si alguna se
+      # rompe, no se despliega.
+      - name: Tests de las funciones
+        working-directory: functions
+        run: npm test
+
       - name: Sitio
         working-directory: frontend
         env:

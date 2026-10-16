@@ -18,6 +18,11 @@ output "main_table_name" {
   value       = module.main_table.dynamodb_table_id
 }
 
+output "connections_table_name" {
+  description = "Tabla de conexiones WebSocket, con el índice byQueue."
+  value       = module.connections_table.dynamodb_table_id
+}
+
 output "function_names" {
   description = "Funciones Lambda desplegadas."
   value       = { for key, function in module.functions : key => function.name }
