@@ -6,7 +6,7 @@ fase anota qué se construyó, qué se decidió en el camino y por qué, qué se
 | Fase | Estado |
 |---|---|
 | 1 · Esqueleto que camina: Terraform y pipeline | **Código completo y verificado localmente. Falta correrlo en el lab.** |
-| 2 · Dominio y persistencia en DynamoDB | **Completa y verificada localmente** (82 tests, DynamoDB Local). La tabla `q-connections` falta crearla en el lab |
+| 2 · Dominio y persistencia en DynamoDB | **Completa y verificada localmente** (83 tests, DynamoDB Local). La tabla `q-connections` falta crearla en el lab |
 | 3 · API síncrona y Cognito | Pendiente |
 | 4 · Bus de eventos | Pendiente |
 | 5 · Consumidores y tiempo real | Pendiente |
@@ -189,7 +189,7 @@ functions/
     client.ts                cliente de documentos (DynamoDB Local si hay DYNAMODB_ENDPOINT)
     queue-store.ts           carga consistente, transacción con versión, reintentos
     directory-store.ts       establecimientos, membresías, avisos, límite por IP
-  test/domain/               64 tests unitarios (vitest)
+  test/domain/               65 tests unitarios (vitest)
   test/integration/          18 tests contra DynamoDB Local (Testcontainers)
   vitest.config.ts           proyectos `unit` e `integration`
 infra/terraform/tables.tf    + q-connections, con el mismo módulo externo
@@ -237,11 +237,25 @@ infra/terraform/tables.tf    + q-connections, con el mismo módulo externo
 | Qué | Resultado |
 |---|---|
 | `npm run typecheck` | Sin errores (incluye los tests) |
-| `npm run test:unit` | 64 tests: orden, selector, estimación, operaciones, las cuatro políticas, carriles, métricas por zona horaria, avisos |
+| `npm run test:unit` | 65 tests: orden, selector, estimación, operaciones, las cuatro políticas, carriles, métricas por zona horaria, avisos |
 | `npm run test:integration` | 18 tests contra DynamoDB Local 3.3.1: ciclo completo, mover SK y referencia, eventos en la transacción, vencimiento al leer, cierre en lotes, rechazo de transacciones de más de 100 ítems, membresías, deduplicación de avisos y límite por IP |
 | Carreras de §6.1 | 5 tests (dos y tres llamados simultáneos, dos joins, último lugar, gracia contra staff). Una barrera fuerza que todos lean la misma versión antes de escribir. Corridos 4 veces seguidas sin fallas |
 | `npm run build` | Sin cambios: el dominio todavía no lo usa ningún handler |
 | Terraform `fmt`, `validate` y `tflint` | Sin errores (con las versiones del pipeline, en Docker) |
+
+### Corregido en la revisión
+
+1. **Dos `MOVE_BACK` al mismo lugar podían recibir la misma clave.** El punto medio es determinista,
+   y un llamado conserva su clave mientras no está en la fila. Si alguien caía en el mismo lugar
+   que un llamado que después volvía con "deshacer llamado", las dos entradas terminaban con el
+   mismo SK y DynamoDB pisaba una con la otra. Ahora el punto medio esquiva las claves de todas las
+   entradas activas, y además la persistencia exige `attribute_not_exists` al escribir el SK nuevo
+   de una entrada que se movió, para que un error ahí falle en lugar de borrar a alguien. Hay un test
+   que reproduce el caso y que falla sin el arreglo.
+2. **Un aviso reservado podía quedar `PENDING` para siempre** si la Lambda moría entre reservarlo y
+   enviarlo: el mismo defecto que tenía `retryFailed` en Java. Ahora un `PENDING` con más de
+   `NOTIFICATION_LEASE_SECONDS` (120 s, más que el timeout del notifier) se puede retomar.
+3. **Los tests no corren al destruir**: un test roto no puede impedir limpiar la cuenta del lab.
 
 ### Sin verificar: necesita el lab
 

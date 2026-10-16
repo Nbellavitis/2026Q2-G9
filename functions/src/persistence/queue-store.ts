@@ -183,7 +183,10 @@ export class QueueStore {
           },
         })
       }
-      put(items.entryItem(entry))
+      // Si se movió, su SK nuevo no puede pisar a otra entrada: el dominio ya evita claves repetidas,
+      // y esta condición garantiza que un error ahí falle en lugar de borrar a alguien de la fila.
+      if (previousSk !== sk) put(items.entryItem(entry), 'attribute_not_exists(PK)')
+      else put(items.entryItem(entry))
     }
 
     for (const laneId of session.touchedLanes) {

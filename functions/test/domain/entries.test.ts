@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  call,
   callNext,
   cancel,
   join,
@@ -180,6 +181,35 @@ describe('ausencias', () => {
     expect(ana.status).toBe('NO_SHOW')
     expect(ana.finishedAt).toBe(NOW.toISOString())
     expect(ids(s.waiting())).toEqual(['bruno', 'carla', 'dario'])
+  })
+
+  it('dos MOVE_BACK al mismo lugar no repiten clave aunque el primero esté llamado', () => {
+    // Bruno cae entre Dario y Eva, y después lo llaman: mientras no está en la fila conserva su
+    // clave, porque si vuelve con "deshacer llamado" la reclama. Cuando Ana cae en el mismo lugar, el
+    // punto medio de esos vecinos es justo la clave de Bruno. Si se la dieran, al deshacer el llamado
+    // de Bruno las dos entradas tendrían el mismo SK y DynamoDB pisaría a una con la otra.
+    const state = queueState({ noShowPolicy: 'MOVE_BACK', moveBackPositions: 2 })
+    state.entries.push(
+      entry('ana', 1, { status: 'CALLED', graceExpiresAt: IN_A_MINUTE }),
+      entry('bruno', 2, { status: 'CALLED', graceExpiresAt: IN_A_MINUTE }),
+      entry('carla', 3),
+      entry('dario', 4),
+      entry('eva', 5),
+    )
+    const s = session(state)
+    markNoShow(s, 'bruno', STAFF)
+    expect(ids(s.waiting())).toEqual(['carla', 'dario', 'bruno', 'eva'])
+    const brunoKey = s.findEntry('bruno')?.orderKey
+
+    call(s, 'bruno', STAFF)
+    markNoShow(s, 'ana', STAFF)
+    expect(ids(s.waiting())).toEqual(['carla', 'dario', 'ana', 'eva'])
+    expect(s.findEntry('ana')?.orderKey).not.toBe(brunoKey)
+
+    requeue(s, 'bruno', STAFF)
+    const keys = s.waiting().map((candidate) => candidate.orderKey)
+    expect(new Set(keys).size).toBe(keys.length)
+    expect(ids(s.waiting())).toEqual(['carla', 'dario', 'ana', 'bruno', 'eva'])
   })
 
   it('volver a esperar abre un ciclo de avisos nuevo', () => {

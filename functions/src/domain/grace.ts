@@ -8,6 +8,7 @@ import { keyForPositionBack, keyForSequence } from './ordering.js'
 import type { Actor, Session } from './state.js'
 import { SYSTEM } from './state.js'
 import type { Entry } from './types.js'
+import { isActive } from './types.js'
 
 /** La clave del final de la fila, consumiendo un número de la secuencia de la cola. */
 export function allocateEndKey(session: Session): string {
@@ -66,7 +67,13 @@ export function applyNoShow(session: Session, entry: Entry, actor: Actor): numbe
     if (policy === 'MOVE_TO_END') {
       entry.orderKey = allocateEndKey(session)
     } else if (policy === 'MOVE_BACK') {
-      entry.orderKey = keyForPositionBack(others, queue.moveBackPositions, () => allocateEndKey(session))
+      // Las claves de los llamados también cuentan: si uno vuelve con KEEP_POSITION, reclama la suya.
+      const taken = new Set(
+        session.state.entries
+          .filter((candidate) => candidate.id !== entry.id && isActive(candidate.status))
+          .map((candidate) => candidate.orderKey),
+      )
+      entry.orderKey = keyForPositionBack(others, queue.moveBackPositions, () => allocateEndKey(session), taken)
     }
     // KEEP_POSITION: la clave que ya tenía la devuelve a su lugar.
 

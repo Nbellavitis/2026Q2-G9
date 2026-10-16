@@ -105,8 +105,9 @@ jobs:
 
       # Los unitarios del dominio y los de integración contra DynamoDB Local (Testcontainers usa el
       # Docker que ya trae el runner). Incluyen las carreras del control optimista: si alguna se
-      # rompe, no se despliega.
+      # rompe, no se despliega. Al destruir no corren: un test roto no puede impedir limpiar la cuenta.
       - name: Tests de las funciones
+        if: github.event.action != 'labeled' && inputs.action != 'destroy'
         working-directory: functions
         run: npm test
 

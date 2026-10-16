@@ -45,9 +45,12 @@ describe('DirectoryStore contra DynamoDB Local', () => {
       sentAt: null,
       failureReason: null,
     }
-    expect(await f.directory.claimNotification(record)).toBe(true)
+    const claimedAt = new Date('2026-03-02T15:00:00Z')
+    expect(await f.directory.claimNotification(record, claimedAt)).toBe(true)
     // Un reintento de SQS mientras el primero sigue pendiente no lo vuelve a tomar.
-    expect(await f.directory.claimNotification(record)).toBe(false)
+    expect(await f.directory.claimNotification(record, new Date('2026-03-02T15:00:30Z'))).toBe(false)
+    // Pero si quedó pendiente más que el lease, quien lo reservó murió antes de enviarlo: se retoma.
+    expect(await f.directory.claimNotification(record, new Date('2026-03-02T15:02:01Z'))).toBe(true)
 
     await f.directory.markNotification('entry-1', 'YOUR_TURN', 0, { status: 'FAILED', reason: 'smtp caído' })
     expect(await f.directory.claimNotification(record)).toBe(true)

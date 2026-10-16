@@ -82,16 +82,30 @@ interface Ordered {
 /**
  * Clave que deja exactamente `positionsBack` personas de `waiting` adelante.
  *
+ * El punto medio es determinista: dos inserciones entre los mismos vecinos darían la misma clave.
+ * Eso importa porque un llamado conserva su clave mientras no está en la fila, y si vuelve con
+ * KEEP_POSITION la reclama. Por eso `taken` lleva las claves de todas las entradas activas, y si el
+ * punto medio coincide con una, se sigue bajando entre el vecino de abajo y esa clave: el resultado
+ * sigue quedando entre los mismos vecinos de la fila.
+ *
  * @param waiting la fila en orden, sin la entrada que se está ubicando
  * @param endKey  la clave del final, por si la posición pedida queda al fondo
+ * @param taken   claves que ya tiene alguna entrada activa (en la fila o llamada)
  */
-export function keyForPositionBack(waiting: readonly Ordered[], positionsBack: number, endKey: () => string): string {
+export function keyForPositionBack(
+  waiting: readonly Ordered[],
+  positionsBack: number,
+  endKey: () => string,
+  taken: ReadonlySet<string> = new Set(),
+): string {
   const target = Math.max(1, positionsBack)
   if (waiting.length === 0 || target >= waiting.length) return endKey()
   const lower = waiting[target - 1]
   const upper = waiting[target]
   if (!lower || !upper) return endKey()
-  return keyBetween(lower.orderKey, upper.orderKey)
+  let key = keyBetween(lower.orderKey, upper.orderKey)
+  while (taken.has(key)) key = keyBetween(lower.orderKey, key)
+  return key
 }
 
 /** Orden de la fila: por clave, y por hora de entrada si alguna vez coincidieran. */

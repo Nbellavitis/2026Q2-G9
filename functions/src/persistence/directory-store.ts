@@ -9,6 +9,12 @@ import * as items from './items.js'
 import type { Item } from './items.js'
 import * as keys from './keys.js'
 
+/**
+ * Cuánto puede quedar un aviso reservado sin enviarse antes de que otro intento lo retome. Tiene que
+ * superar el timeout de `λ notifier` (30 s), para no retomar uno que todavía se está enviando.
+ */
+export const NOTIFICATION_LEASE_SECONDS = 120
+
 export interface QueueListing {
   queueId: string
   name: string
@@ -100,10 +106,12 @@ export class DirectoryStore {
   }
 
   /**
-   * Reserva un aviso antes de enviarlo (arquitectura-serverless.md §6.5). Pasa si nunca se intentó o
-   * si el intento anterior falló; si ya se envió, devuelve false y no hay que mandar nada.
+   * Reserva un aviso antes de enviarlo (arquitectura-serverless.md §6.5). Pasa si nunca se intentó,
+   * si el intento anterior falló, o si quedó PENDING más de `leaseSeconds`: eso significa que la
+   * Lambda que lo reservó murió antes de enviarlo, y sin este caso el aviso no saldría nunca (el
+   * mismo defecto que tenía `retryFailed` en la versión Java). Si ya se envió, devuelve false.
    */
-  async claimNotification(record: NotificationRecord): Promise<boolean> {
+  async claimNotification(record: NotificationRecord, now = new Date(), leaseSeconds = NOTIFICATION_LEASE_SECONDS): Promise<boolean> {
     try {
       await this.table.documents.send(
         new PutCommand({
@@ -113,10 +121,16 @@ export class DirectoryStore {
             SK: keys.notificationSk(record.type, record.cycle),
             kind: 'NOTIFICATION',
             ...record,
+            claimedAt: now.toISOString(),
           },
-          ConditionExpression: 'attribute_not_exists(PK) OR #status = :failed',
+          ConditionExpression:
+            'attribute_not_exists(PK) OR #status = :failed OR (#status = :pending AND claimedAt < :staleBefore)',
           ExpressionAttributeNames: { '#status': 'status' },
-          ExpressionAttributeValues: { ':failed': 'FAILED' },
+          ExpressionAttributeValues: {
+            ':failed': 'FAILED',
+            ':pending': 'PENDING',
+            ':staleBefore': new Date(now.getTime() - leaseSeconds * 1000).toISOString(),
+          },
         }),
       )
       return true
