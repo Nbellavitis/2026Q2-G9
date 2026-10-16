@@ -1,5 +1,6 @@
 // Configuración y ciclo de vida de una cola, y la gestión de sus carriles.
 
+import { LIMITS } from './entries.js'
 import { conflict, notFound, validation } from './errors.js'
 import { expireDue } from './grace.js'
 import { isLive, requireAnotherActiveLane, requireNameFree, validateLane, validateOverlap } from './lanes.js'
@@ -179,7 +180,13 @@ export function updateLane(session: Session, laneId: string, settings: LaneSetti
     active: settings.active ?? lane.active,
   }
   validateLane(updated)
-  if (!updated.active) requireAnotherActiveLane(session.state.lanes, lane.id)
+  if (!updated.active && lane.active) {
+    requireAnotherActiveLane(session.state.lanes, lane.id)
+    // Un carril inactivo sale de la rotación del round robin. Si todavía tuviera gente, esa gente
+    // solo se llamaría cuando todos los demás carriles estén vacíos: en un turno con movimiento,
+    // nunca. Igual que al retirarlo, primero hay que vaciarlo.
+    requireNoActiveEntries(session, lane)
+  }
   validateOverlap(session.state.lanes, updated)
   Object.assign(lane, updated)
   session.touchLane(lane)
@@ -195,9 +202,7 @@ export function retireLane(session: Session, laneId: string, actor: Actor): Lane
   requireLanesEditable(session.queue)
   const lane = requireLane(session, laneId)
   if (lane.active) requireAnotherActiveLane(session.state.lanes, lane.id)
-  if (session.state.entries.some((entry) => entry.laneId === lane.id && isActive(entry.status))) {
-    throw conflict('LANE_HAS_ACTIVE_ENTRIES', 'A lane with active entries cannot be deleted')
-  }
+  requireNoActiveEntries(session, lane)
   lane.active = false
   lane.deletedAt = session.nowIso
   session.touchLane(lane)
@@ -205,25 +210,56 @@ export function retireLane(session: Session, laneId: string, actor: Actor): Lane
   return lane
 }
 
-/** Las mismas restricciones que tenía la base como CHECK: un valor malo es un 400, no un 500. */
+/**
+ * Rangos de la configuración. Además de los mínimos que la base Java tenía como CHECK, cada valor
+ * tiene un techo: una gracia de mil millones de segundos no es una configuración, es un error que
+ * rompe el cálculo de la fecha de vencimiento y deja una cadena de mensajes SQS durante años.
+ */
+export const QUEUE_BOUNDS = {
+  name: 120,
+  description: 500,
+  serviceStations: { min: 1, max: 100 },
+  defaultServiceMinutes: { min: 1, max: 480 },
+  gracePeriodSeconds: { min: 0, max: 3600 },
+  moveBackPositions: { min: 1, max: 1000 },
+  notifyAtPosition: { min: 1, max: 1000 },
+  notifyAtMinutes: { min: 1, max: 480 },
+} as const
+
+const inRange = (value: number, range: { min: number; max: number }) =>
+  Number.isInteger(value) && value >= range.min && value <= range.max
+
+const rangeMessage = (field: string, range: { min: number; max: number }) =>
+  `${field} must be an integer between ${range.min} and ${range.max}`
+
+/** Las restricciones de la configuración: un valor malo es un 400, no un 500. */
 export function validateQueue(queue: Queue): void {
+  const b = QUEUE_BOUNDS
   if (!queue.name) throw validation('QUEUE_NAME_REQUIRED', 'A queue name is required')
-  if (!(queue.serviceStations >= 1)) throw validation('INVALID_SERVICE_STATIONS', 'serviceStations must be at least 1')
-  if (!(queue.defaultServiceMinutes >= 1)) {
-    throw validation('INVALID_SERVICE_TIME', 'defaultServiceMinutes must be at least 1')
+  if (queue.name.length > b.name) throw validation('QUEUE_NAME_TOO_LONG', `A queue name has at most ${b.name} characters`)
+  if (queue.description !== null && queue.description.length > b.description) {
+    throw validation('QUEUE_DESCRIPTION_TOO_LONG', `A description has at most ${b.description} characters`)
   }
-  if (queue.maxSize !== null && !(queue.maxSize >= 1)) {
-    throw validation('INVALID_MAX_SIZE', 'maxSize must be at least 1 when present')
+  if (!inRange(queue.serviceStations, b.serviceStations)) {
+    throw validation('INVALID_SERVICE_STATIONS', rangeMessage('serviceStations', b.serviceStations))
   }
-  if (!(queue.gracePeriodSeconds >= 0)) {
-    throw validation('INVALID_GRACE_PERIOD', 'gracePeriodSeconds cannot be negative')
+  if (!inRange(queue.defaultServiceMinutes, b.defaultServiceMinutes)) {
+    throw validation('INVALID_SERVICE_TIME', rangeMessage('defaultServiceMinutes', b.defaultServiceMinutes))
   }
-  if (!(queue.moveBackPositions >= 1)) throw validation('INVALID_MOVE_BACK', 'moveBackPositions must be at least 1')
-  if (queue.notifyAtPosition !== null && !(queue.notifyAtPosition >= 1)) {
-    throw validation('INVALID_NOTIFY_POSITION', 'notifyAtPosition must be at least 1')
+  if (queue.maxSize !== null && !inRange(queue.maxSize, { min: 1, max: LIMITS.activeEntries })) {
+    throw validation('INVALID_MAX_SIZE', rangeMessage('maxSize', { min: 1, max: LIMITS.activeEntries }))
   }
-  if (queue.notifyAtMinutes !== null && !(queue.notifyAtMinutes >= 1)) {
-    throw validation('INVALID_NOTIFY_MINUTES', 'notifyAtMinutes must be at least 1')
+  if (!inRange(queue.gracePeriodSeconds, b.gracePeriodSeconds)) {
+    throw validation('INVALID_GRACE_PERIOD', rangeMessage('gracePeriodSeconds', b.gracePeriodSeconds))
+  }
+  if (!inRange(queue.moveBackPositions, b.moveBackPositions)) {
+    throw validation('INVALID_MOVE_BACK', rangeMessage('moveBackPositions', b.moveBackPositions))
+  }
+  if (queue.notifyAtPosition !== null && !inRange(queue.notifyAtPosition, b.notifyAtPosition)) {
+    throw validation('INVALID_NOTIFY_POSITION', rangeMessage('notifyAtPosition', b.notifyAtPosition))
+  }
+  if (queue.notifyAtMinutes !== null && !inRange(queue.notifyAtMinutes, b.notifyAtMinutes)) {
+    throw validation('INVALID_NOTIFY_MINUTES', rangeMessage('notifyAtMinutes', b.notifyAtMinutes))
   }
 }
 
@@ -240,6 +276,12 @@ function applySettings(queue: Queue, settings: QueueSettings): void {
   if (settings.notifyAtMinutes !== undefined) queue.notifyAtMinutes = settings.notifyAtMinutes
   if (settings.requirePartySize !== undefined) queue.requirePartySize = settings.requirePartySize
   if (settings.callStrategy !== undefined) queue.callStrategy = settings.callStrategy
+}
+
+function requireNoActiveEntries(session: Session, lane: Lane): void {
+  if (session.state.entries.some((entry) => entry.laneId === lane.id && isActive(entry.status))) {
+    throw conflict('LANE_HAS_ACTIVE_ENTRIES', 'A lane with active entries cannot be deactivated or deleted')
+  }
 }
 
 function requireNotArchived(queue: Queue): void {

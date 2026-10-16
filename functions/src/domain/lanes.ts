@@ -38,14 +38,20 @@ export function ensureLaneCapacity(lane: Lane, entries: readonly Entry[], partyS
   }
 }
 
+const isWhole = (value: number, min: number, max: number) => Number.isInteger(value) && value >= min && value <= max
+
 export function validateLane(lane: Lane): void {
-  if (lane.minPartySize < 1 || (lane.maxPartySize !== null && lane.maxPartySize < lane.minPartySize)) {
+  if (!lane.name || lane.name.length > 120) throw validation('INVALID_LANE_NAME', 'A lane name has 1 to 120 characters')
+  if (
+    !isWhole(lane.minPartySize, 1, 1000) ||
+    (lane.maxPartySize !== null && !isWhole(lane.maxPartySize, lane.minPartySize, 1000))
+  ) {
     throw validation('INVALID_LANE_RANGE', 'Lane party-size range is invalid')
   }
-  if (lane.maxSize !== null && lane.maxSize < 1) {
+  if (lane.maxSize !== null && !isWhole(lane.maxSize, 1, 10_000)) {
     throw validation('INVALID_LANE_CAPACITY', 'Lane capacity must be positive')
   }
-  if (lane.priority < 0 || !(lane.timeFactor > 0)) {
+  if (!isWhole(lane.priority, 0, 1000) || !(lane.timeFactor >= 0.1 && lane.timeFactor <= 10)) {
     throw validation('INVALID_LANE_CONFIGURATION', 'Lane priority and time factor are invalid')
   }
 }

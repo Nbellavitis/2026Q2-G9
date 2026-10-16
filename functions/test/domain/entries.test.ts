@@ -12,6 +12,7 @@ import {
   startServing,
   transition,
 } from '../../src/domain/entries.js'
+import { LIMITS } from '../../src/domain/entries.js'
 import { DomainError } from '../../src/domain/errors.js'
 import { expireDue } from '../../src/domain/grace.js'
 import { changeStatus } from '../../src/domain/queues.js'
@@ -63,6 +64,29 @@ describe('join', () => {
     const state = queueState({ maxSize: 2 })
     state.entries.push(entry('a', 1), entry('b', 2, { status: 'CALLED' }))
     expect(codeOf(() => join(session(state), { name: 'C', email: 'c@x.y' }))).toBe('QUEUE_FULL')
+  })
+
+  it('pone techo a lo que escribe un cliente anónimo', () => {
+    const s = session(queueState())
+    expect(codeOf(() => join(s, { name: 'x'.repeat(121), email: 'a@b.co' }))).toBe('CUSTOMER_NAME_TOO_LONG')
+    expect(codeOf(() => join(s, { name: 'Ana', email: 'no-es-un-mail' }))).toBe('INVALID_EMAIL')
+    expect(codeOf(() => join(s, { name: 'Ana', email: `${'a'.repeat(250)}@b.co` }))).toBe('INVALID_EMAIL')
+    expect(codeOf(() => join(s, { name: 'Ana', phone: '<script>' }))).toBe('INVALID_PHONE')
+    expect(codeOf(() => join(s, { name: 'Ana', email: 'a@b.co', partySize: 51 }))).toBe('INVALID_PARTY_SIZE')
+    expect(codeOf(() => join(s, { name: 'Ana', email: 'a@b.co', partySize: 2.5 }))).toBe('INVALID_PARTY_SIZE')
+    expect(s.events).toHaveLength(0)
+  })
+
+  it('un idioma desconocido cae en inglés', () => {
+    const s = session(queueState())
+    expect(join(s, { name: 'Ana', email: 'a@b.co', locale: 'xx' as 'en' }).locale).toBe('en')
+    expect(join(s, { name: 'Bea', email: 'b@b.co', locale: 'es' }).locale).toBe('es')
+  })
+
+  it('sin maxSize igual hay un techo absoluto de entradas activas', () => {
+    const state = queueState({ maxSize: null })
+    for (let i = 1; i <= LIMITS.activeEntries; i++) state.entries.push(entry(`e${i}`, i))
+    expect(codeOf(() => join(session(state), { name: 'Una más', email: 'x@y.zz' }))).toBe('QUEUE_FULL')
   })
 
   it('elige el carril más específico y respeta su capacidad', () => {
@@ -267,7 +291,24 @@ describe('cerrar una cola', () => {
     expect(codeOf(() => join(s, { name: 'X', email: 'x@y.z' }))).toBe('QUEUE_NOT_ACCEPTING')
   })
 
-  it('libera en lotes, primero a los que estaban siendo atendidos', () => {
+  it('a quien ya está en el mostrador no lo libera: el staff lo termina de atender', () => {
+    const state = queueState({ status: 'CLOSED' })
+    const startedAt = new Date(NOW.getTime() - 60_000).toISOString()
+    state.entries.push(entry('a', 1), entry('serving', 2, { status: 'SERVING', servingStartedAt: startedAt }))
+    const s = session(state)
+    expect(releaseBatch(s, 10, STAFF)).toBe(1)
+    expect(releaseBatch(s, 10, STAFF)).toBe(0)
+    expect(s.findEntry('serving')?.status).toBe('SERVING')
+    expect(markServed(s, 'serving', STAFF).status).toBe('SERVED')
+  })
+
+  it('traer de vuelta a alguien respeta el tope de la cola', () => {
+    const state = queueState({ maxSize: 1 })
+    state.entries.push(entry('a', 1), entry('gone', 2, { status: 'LEFT', finishedAt: NOW.toISOString() }))
+    expect(codeOf(() => requeue(session(state), 'gone', STAFF))).toBe('QUEUE_FULL')
+  })
+
+  it('libera en lotes, primero a los que estaban llamados', () => {
     const state = queueState({ status: 'CLOSED' })
     state.entries.push(entry('a', 1), entry('b', 2), entry('c', 3, { status: 'CALLED' }))
     const s = session(state)

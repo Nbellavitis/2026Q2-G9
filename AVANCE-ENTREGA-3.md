@@ -6,7 +6,7 @@ fase anota qué se construyó, qué se decidió en el camino y por qué, qué se
 | Fase | Estado |
 |---|---|
 | 1 · Esqueleto que camina: Terraform y pipeline | **Código completo y verificado localmente. Falta correrlo en el lab.** |
-| 2 · Dominio y persistencia en DynamoDB | **Completa y verificada localmente** (83 tests, DynamoDB Local). La tabla `q-connections` falta crearla en el lab |
+| 2 · Dominio y persistencia en DynamoDB | **Completa y verificada localmente** (92 tests, DynamoDB Local). La tabla `q-connections` falta crearla en el lab |
 | 3 · API síncrona y Cognito | Pendiente |
 | 4 · Bus de eventos | Pendiente |
 | 5 · Consumidores y tiempo real | Pendiente |
@@ -189,8 +189,8 @@ functions/
     client.ts                cliente de documentos (DynamoDB Local si hay DYNAMODB_ENDPOINT)
     queue-store.ts           carga consistente, transacción con versión, reintentos
     directory-store.ts       establecimientos, membresías, avisos, límite por IP
-  test/domain/               65 tests unitarios (vitest)
-  test/integration/          18 tests contra DynamoDB Local (Testcontainers)
+  test/domain/               73 tests unitarios (vitest)
+  test/integration/          19 tests contra DynamoDB Local (Testcontainers)
   vitest.config.ts           proyectos `unit` e `integration`
 infra/terraform/tables.tf    + q-connections, con el mismo módulo externo
 .github/workflows/terraform.yml  + `npm test` en el job build
@@ -237,8 +237,8 @@ infra/terraform/tables.tf    + q-connections, con el mismo módulo externo
 | Qué | Resultado |
 |---|---|
 | `npm run typecheck` | Sin errores (incluye los tests) |
-| `npm run test:unit` | 65 tests: orden, selector, estimación, operaciones, las cuatro políticas, carriles, métricas por zona horaria, avisos |
-| `npm run test:integration` | 18 tests contra DynamoDB Local 3.3.1: ciclo completo, mover SK y referencia, eventos en la transacción, vencimiento al leer, cierre en lotes, rechazo de transacciones de más de 100 ítems, membresías, deduplicación de avisos y límite por IP |
+| `npm run test:unit` | 73 tests: orden, selector, estimación, operaciones, las cuatro políticas, carriles, métricas por zona horaria, avisos |
+| `npm run test:integration` | 19 tests contra DynamoDB Local 3.3.1: ciclo completo, mover SK y referencia, eventos en la transacción, vencimiento al leer, cierre en lotes, rechazo de transacciones de más de 100 ítems, membresías, deduplicación de avisos y límite por IP |
 | Carreras de §6.1 | 5 tests (dos y tres llamados simultáneos, dos joins, último lugar, gracia contra staff). Una barrera fuerza que todos lean la misma versión antes de escribir. Corridos 4 veces seguidas sin fallas |
 | `npm run build` | Sin cambios: el dominio todavía no lo usa ningún handler |
 | Terraform `fmt`, `validate` y `tflint` | Sin errores (con las versiones del pipeline, en Docker) |
@@ -256,6 +256,26 @@ infra/terraform/tables.tf    + q-connections, con el mismo módulo externo
    enviarlo: el mismo defecto que tenía `retryFailed` en Java. Ahora un `PENDING` con más de
    `NOTIFICATION_LEASE_SECONDS` (120 s, más que el timeout del notifier) se puede retomar.
 3. **Los tests no corren al destruir**: un test roto no puede impedir limpiar la cuenta del lab.
+
+### Audit de flujos (después del push)
+
+Revisión de todos los flujos de cliente y de staff buscando casos borde y cualquier cosa que pueda
+costar plata o usuarios. Corregido, con tests:
+
+| Problema | Riesgo | Arreglo |
+|---|---|---|
+| Sin límite de largo en nombre, email y teléfono, ni validación de formato | Cada mutación lee todas las entradas activas: nombres de cientos de KB harían que operar la cola cueste megabytes de lectura por acción | Nombre ≤ 120, email ≤ 254 con formato, teléfono con patrón, grupo de 1 a 50 |
+| Sin `maxSize`, la cola no tenía techo | Lo mismo, sin cota | Techo absoluto de 1000 entradas activas, también para "traer de vuelta" |
+| Configuración sin máximos ni enteros (una gracia de 10⁹ s, 1,5 puestos) | Rompe el cálculo del vencimiento (500) y armaría una cadena de mensajes SQS de años | Rango y entero para cada valor (gracia ≤ 3600 s, puestos ≤ 100, etc.) y para los carriles |
+| Se podía desactivar un carril con gente esperando | En round robin, esa gente solo se llama cuando todos los otros carriles están vacíos: en un turno con movimiento, nunca | Igual que retirarlo: primero hay que vaciarlo |
+| Cerrar la cola liberaba también a quien estaba en el mostrador | Le llegaba "la cola cerró" mientras lo atendían, y quedaba como abandono en las métricas | El cierre libera esperando y llamados; los que se atienden se terminan y se marcan atendidos |
+| Idioma desconocido se guardaba tal cual | No hay plantilla de aviso para ese idioma | Cae en inglés |
+| 5 reintentos ante conflicto | Una ráfaga de escaneos del QR podía devolver 409 a alguien que solo quería anotarse | 8 reintentos |
+| Toda lectura era fuertemente consistente | El doble de costo en lo que más se consulta | `read(..., { consistent: false })` para la vista pública; mutaciones y ticket siguen fuertes |
+
+Requisitos que el audit deja para las fases siguientes (anotados en el ROADMAP): IP desde
+`sourceIp`, body en base64 por `binary_media_types`, autorización contra la cola leída, throttling
+por método, reintento del frontend ante 409, y tope de reintentos en colas y stream.
 
 ### Sin verificar: necesita el lab
 

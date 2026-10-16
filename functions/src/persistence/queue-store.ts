@@ -22,7 +22,12 @@ import * as keys from './keys.js'
 
 /** El máximo de una transacción de DynamoDB. */
 export const MAX_TRANSACTION_ITEMS = 100
-export const DEFAULT_MAX_ATTEMPTS = 5
+/**
+ * Intentos ante un conflicto de versión. Con 5, una ráfaga de escaneos del QR sobre la misma cola
+ * podía agotarlos y devolverle 409 a alguien que solo quería anotarse; 8 con backoff de hasta
+ * 500 ms sigue entrando holgado en el timeout de la función.
+ */
+export const DEFAULT_MAX_ATTEMPTS = 8
 
 type TransactItem = NonNullable<TransactWriteCommandInput['TransactItems']>[number]
 
@@ -51,19 +56,28 @@ export class QueueStore {
   constructor(private readonly table: TableConfig) {}
 
   /**
-   * La cola con sus carriles y sus entradas activas, con lecturas fuertemente consistentes: después
-   * de escribir, quien lee ve lo que se escribió (un cliente que se acaba de unir se encuentra).
+   * La cola con sus carriles y sus entradas activas. Por defecto con lecturas fuertemente
+   * consistentes: después de escribir, quien lee ve lo que se escribió (un cliente que se acaba de
+   * unir se encuentra). Las mutaciones siempre leen así.
+   *
+   * `consistent: false` cuesta la mitad y sirve para lo que se consulta seguido y tolera un atraso de
+   * milisegundos, como la vista pública de la página de ingreso, que se refresca cada 15 s. El ticket
+   * de un cliente no: se lo pide justo después de unirse.
    */
-  async load(queueId: string, entryIds: readonly string[] = []): Promise<QueueState> {
+  async load(queueId: string, entryIds: readonly string[] = [], options: { consistent?: boolean } = {}): Promise<QueueState> {
+    const consistent = options.consistent ?? true
     const pk = keys.queuePk(queueId)
     const [config, inService, waiting] = await Promise.all([
       // `LANE#…` < `META` en orden de bytes: un solo rango trae los carriles y la configuración.
-      this.queryAll({
-        KeyConditionExpression: 'PK = :pk AND SK BETWEEN :from AND :to',
-        ExpressionAttributeValues: { ':pk': pk, ':from': 'LANE#', ':to': keys.QUEUE_META_SK },
-      }),
-      this.queryPrefix(pk, keys.IN_SERVICE_PREFIX),
-      this.queryPrefix(pk, keys.WAITING_PREFIX),
+      this.queryAll(
+        {
+          KeyConditionExpression: 'PK = :pk AND SK BETWEEN :from AND :to',
+          ExpressionAttributeValues: { ':pk': pk, ':from': 'LANE#', ':to': keys.QUEUE_META_SK },
+        },
+        consistent,
+      ),
+      this.queryPrefix(pk, keys.IN_SERVICE_PREFIX, consistent),
+      this.queryPrefix(pk, keys.WAITING_PREFIX, consistent),
     ])
 
     const metaItem = config.find((item) => item['SK'] === keys.QUEUE_META_SK)
@@ -86,12 +100,18 @@ export class QueueStore {
    * Lee la cola para responder una consulta. Si encuentra una gracia vencida la aplica antes, así
    * nadie ve un llamado que el reloj ya invalidó; si no, no escribe nada.
    */
-  async read(queueId: string, options: Pick<MutateOptions, 'entryIds' | 'now'> = {}): Promise<QueueState> {
+  async read(
+    queueId: string,
+    options: Pick<MutateOptions, 'entryIds' | 'now'> & { consistent?: boolean } = {},
+  ): Promise<QueueState> {
     const now = options.now ?? (() => new Date())
-    const state = await this.load(queueId, options.entryIds)
+    const state = await this.load(queueId, options.entryIds, { consistent: options.consistent ?? true })
     if (!hasDueGrace(state.entries, now())) return state
     // Si otro disparador ya la aplicó, el reintento relee y no encuentra nada: no es un error.
-    const { state: fresh } = await this.mutate(queueId, (session) => expireDue(session), options)
+    const { state: fresh } = await this.mutate(queueId, (session) => expireDue(session), {
+      ...(options.entryIds ? { entryIds: options.entryIds } : {}),
+      now,
+    })
     return fresh
   }
 
@@ -277,19 +297,25 @@ export class QueueStore {
     return Item ?? null
   }
 
-  private queryPrefix(pk: string, prefix: string): Promise<Item[]> {
-    return this.queryAll({
-      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
-      ExpressionAttributeValues: { ':pk': pk, ':prefix': prefix },
-    })
+  private queryPrefix(pk: string, prefix: string, consistent = true): Promise<Item[]> {
+    return this.queryAll(
+      {
+        KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
+        ExpressionAttributeValues: { ':pk': pk, ':prefix': prefix },
+      },
+      consistent,
+    )
   }
 
-  private async queryAll(input: { KeyConditionExpression: string; ExpressionAttributeValues: Record<string, unknown> }) {
+  private async queryAll(
+    input: { KeyConditionExpression: string; ExpressionAttributeValues: Record<string, unknown> },
+    consistent = true,
+  ) {
     const found: Item[] = []
     let start: Record<string, unknown> | undefined
     do {
       const page = await this.table.documents.send(
-        new QueryCommand({ TableName: this.table.tableName, ConsistentRead: true, ExclusiveStartKey: start, ...input }),
+        new QueryCommand({ TableName: this.table.tableName, ConsistentRead: consistent, ExclusiveStartKey: start, ...input }),
       )
       found.push(...((page.Items ?? []) as Item[]))
       start = page.LastEvaluatedKey

@@ -23,9 +23,30 @@ export interface JoinCommand {
 }
 
 const trimmed = (value: string | null | undefined): string | null => {
-  const text = value?.trim()
+  const text = typeof value === 'string' ? value.trim() : ''
   return text ? text : null
 }
+
+/**
+ * Límites de lo que escribe un cliente anónimo. No son estéticos: cada mutación de una cola lee
+ * todas sus entradas activas, así que un nombre de 300 KB repetido en cada entrada haría que operar
+ * la cola costara megabytes de lectura por acción (y DynamoDB rechaza ítems de más de 400 KB).
+ */
+export const LIMITS = {
+  name: 120,
+  email: 254,
+  phone: 32,
+  partySize: 50,
+  /** Techo absoluto de entradas activas por cola, aunque `maxSize` no esté configurado. */
+  activeEntries: 1000,
+} as const
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const PHONE_PATTERN = /^\+?[0-9 ()-]{6,32}$/
+const LOCALES: readonly SupportedLocale[] = ['en', 'es']
+
+/** El tope efectivo de la cola: su `maxSize` o, si no tiene, el techo absoluto. */
+export const capacityOf = (maxSize: number | null): number => Math.min(maxSize ?? LIMITS.activeEntries, LIMITS.activeEntries)
 
 /** Funcionalidad 1: un cliente escanea el QR y toma un lugar. */
 export function join(session: Session, command: JoinCommand): Entry {
@@ -34,6 +55,7 @@ export function join(session: Session, command: JoinCommand): Entry {
 
   const name = trimmed(command.name)
   if (!name) throw validation('CUSTOMER_NAME_REQUIRED', 'A name is required')
+  if (name.length > LIMITS.name) throw validation('CUSTOMER_NAME_TOO_LONG', `A name has at most ${LIMITS.name} characters`)
   const email = trimmed(command.email)?.toLowerCase() ?? null
   const phone = trimmed(command.phone)
   if (!email && !phone) {
@@ -41,6 +63,12 @@ export function join(session: Session, command: JoinCommand): Entry {
       'CONTACT_REQUIRED',
       'An email address or a phone number is required so we can send you your ticket link',
     )
+  }
+  if (email !== null && (email.length > LIMITS.email || !EMAIL_PATTERN.test(email))) {
+    throw validation('INVALID_EMAIL', 'The email address is not valid')
+  }
+  if (phone !== null && !PHONE_PATTERN.test(phone)) {
+    throw validation('INVALID_PHONE', 'The phone number is not valid')
   }
   if (queue.status !== 'OPEN' || queue.archivedAt !== null) {
     throw conflict(
@@ -51,16 +79,12 @@ export function join(session: Session, command: JoinCommand): Entry {
 
   // Una farmacia o un banco no tienen noción de grupo: una persona es el valor honesto por defecto.
   const partySize = command.partySize ?? 1
-  if (!Number.isInteger(partySize) || partySize < 1) {
-    throw validation('INVALID_PARTY_SIZE', 'partySize must be a positive integer')
+  if (!Number.isInteger(partySize) || partySize < 1 || partySize > LIMITS.partySize) {
+    throw validation('INVALID_PARTY_SIZE', `partySize must be an integer between 1 and ${LIMITS.partySize}`)
   }
   const lane = selectLane(session.state.lanes, partySize)
   ensureLaneCapacity(lane, session.state.entries, partySize)
-
-  const active = session.state.entries.filter((entry) => isActive(entry.status)).length
-  if (queue.maxSize !== null && active + 1 > queue.maxSize) {
-    throw conflict('QUEUE_FULL', 'This queue has reached its maximum size')
-  }
+  requireRoom(session)
 
   const entry: Entry = {
     id: session.newId(),
@@ -72,7 +96,8 @@ export function join(session: Session, command: JoinCommand): Entry {
     customerEmail: email,
     customerPhone: phone,
     partySize,
-    locale: command.locale ?? 'en',
+    // Un idioma desconocido cae en inglés en lugar de rechazar a nadie.
+    locale: command.locale && LOCALES.includes(command.locale) ? command.locale : 'en',
     status: 'WAITING',
     orderKey: allocateEndKey(session),
     notificationCycle: 0,
@@ -208,6 +233,8 @@ export function requeue(session: Session, entryId: string, actor: Actor): Entry 
   if (entry.status === 'WAITING') throw conflict('ALREADY_WAITING', 'This entry is already waiting')
 
   const wasTerminal = isTerminal(entry.status)
+  // Traer de vuelta a alguien que ya no estaba suma una entrada activa: respeta el tope igual que un join.
+  if (wasTerminal) requireRoom(session)
   entry.status = 'WAITING'
   entry.calledAt = null
   entry.servingStartedAt = null
@@ -246,14 +273,19 @@ export function transition(session: Session, entryId: string, target: EntryStatu
 export const RELEASE_BATCH_SIZE = 24
 
 /**
- * Libera hasta `limit` entradas activas de una cola cerrada. Lo usa `λ lifecycle` en lotes, para que
- * ninguna transacción pase el límite de 100 ítems de DynamoDB.
+ * Libera hasta `limit` entradas de una cola cerrada. Lo usa `λ lifecycle` en lotes, para que ninguna
+ * transacción pase el límite de 100 ítems de DynamoDB.
  *
- * @returns cuántas liberó; cero significa que ya no queda nadie
+ * A quien ya se está atendiendo (SERVING) no se lo libera: cerrar a fin del día con el último cliente
+ * en el mostrador no puede mandarle "la cola cerró" ni registrarlo como abandono. El staff lo termina
+ * de atender y lo marca como atendido, que en una cola cerrada sigue permitido.
+ *
+ * @returns cuántas liberó; cero significa que ya no queda nadie por liberar
  */
 export function releaseBatch(session: Session, limit: number, actor: Actor): number {
   if (session.queue.status !== 'CLOSED') return 0
-  const batch = [...session.inService(), ...session.waiting()].slice(0, Math.max(0, limit))
+  const called = session.inService().filter((entry) => entry.status === 'CALLED')
+  const batch = [...called, ...session.waiting()].slice(0, Math.max(0, limit))
   for (const entry of batch) release(session, entry, actor, { reason: 'QUEUE_CLOSED' })
   return batch.length
 }
@@ -286,6 +318,13 @@ function requireEntry(session: Session, entryId: string): Entry {
   const entry = session.findEntry(entryId)
   if (!entry) throw notFound('ENTRY_NOT_FOUND', `Entry ${entryId} was not found`)
   return entry
+}
+
+function requireRoom(session: Session): void {
+  const active = session.state.entries.filter((entry) => isActive(entry.status)).length
+  if (active + 1 > capacityOf(session.queue.maxSize)) {
+    throw conflict('QUEUE_FULL', 'This queue has reached its maximum size')
+  }
 }
 
 function requireOperable(session: Session): void {

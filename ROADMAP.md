@@ -243,7 +243,19 @@ carreras están cubiertas por tests. **Cumplido**: ver [AVANCE-ENTREGA-3.md](AVA
   - `/api/v1/*` → `λ staff`, con el **authorizer de Cognito**.
   - Validación del body con JSON Schema y *throttling* por método.
   - Se eliminan la Lambda y la tabla de prueba de la Fase 1.
-- [ ] Límite por IP en `λ public` (§3.1).
+- [ ] Límite por IP en `λ public` (§3.1), con la IP de `requestContext.identity.sourceIp`: el
+      header `X-Forwarded-For` lo puede inventar cualquiera.
+- [ ] Decodificar el body cuando `isBase64Encoded` es `true`: con `binary_media_types = ["*/*"]`,
+      API Gateway entrega en base64 también los JSON. O acotar los tipos binarios a fuentes e imágenes.
+- [ ] Autorizar contra el establecimiento de la cola **leída**, nunca contra un id que mande el
+      cliente: `requireMember(sub, state.queue.establishmentId)`. Para operar por id de entrada,
+      resolver la cola con `queueIdOfEntry` y recién ahí verificar la membresía.
+- [ ] La vista pública de la cola (la página de ingreso, que se refresca cada 15 s) con
+      `read(queueId, { consistent: false })`; el ticket del cliente, siempre consistente.
+- [ ] Throttling por método en lugar de uno solo para `*/*`: hoy el techo de 50 rps lo comparten el
+      sitio, los polls y los joins, y veinte personas escaneando el mismo QR piden cientos de
+      archivos del sitio a la vez.
+- [ ] El frontend reintenta ante `409 CONCURRENT_MODIFICATION` antes de mostrar un error.
 - [ ] Frontend:
   - `basePath: '/prod'` y las URLs, el id del user pool y el del cliente leídos de `config.json`,
     que escribe Terraform;
@@ -270,6 +282,8 @@ cliente y llamar, todo desplegado por el pipeline. Sin tiempo real todavía.
 - [ ] Las tres colas con el módulo `queue-with-dlq`: `q-push` (FIFO), `q-notifications` (standard,
       con filtro por `type`) y `q-lifecycle` (standard).
 - [ ] `MaximumConcurrency` en cada consumidor, según el presupuesto de §9.
+- [ ] `maxReceiveCount` en todas las colas y `MaximumRetryAttempts` en el stream: sin tope, un
+      mensaje que siempre falla se reintenta para siempre y se cobra cada invocación.
 - [ ] Alarma de edad del mensaje más viejo de `q-push` mayor a 10 s. Todas las alarmas avisan a SNS
       `q-alerts`.
 

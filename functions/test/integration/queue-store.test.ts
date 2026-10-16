@@ -121,6 +121,13 @@ describe('QueueStore contra DynamoDB Local', () => {
     expect((await f.queues.load(queueId)).entries).toHaveLength(40)
   })
 
+  it('la lectura barata (eventual) devuelve lo mismo que la consistente', async () => {
+    const queueId = await createQueue(f.queues)
+    await f.queues.mutate(queueId, (s) => join(s, { name: 'Ana', email: 'a@x.y' }))
+    const cheap = await f.queues.read(queueId, { consistent: false })
+    expect(cheap.entries.map((entry) => entry.customerName)).toEqual(['Ana'])
+  })
+
   it('una cola que no existe es un 404 del dominio', async () => {
     await expect(f.queues.load('no-existe')).rejects.toMatchObject({ code: 'QUEUE_NOT_FOUND', status: 404 })
   })

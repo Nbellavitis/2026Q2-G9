@@ -24,6 +24,17 @@ describe('configuración de la cola', () => {
     expect(codeOf(() => updateQueue(s, { gracePeriodSeconds: -1 }, STAFF))).toBe('INVALID_GRACE_PERIOD')
     expect(codeOf(() => updateQueue(s, { notifyAtMinutes: 0 }, STAFF))).toBe('INVALID_NOTIFY_MINUTES')
   })
+
+  it('cada valor tiene techo y tiene que ser entero', () => {
+    const s = session(queueState())
+    expect(codeOf(() => updateQueue(s, { gracePeriodSeconds: 1_000_000_000 }, STAFF))).toBe('INVALID_GRACE_PERIOD')
+    expect(codeOf(() => updateQueue(s, { serviceStations: 1.5 }, STAFF))).toBe('INVALID_SERVICE_STATIONS')
+    expect(codeOf(() => updateQueue(s, { maxSize: 5000 }, STAFF))).toBe('INVALID_MAX_SIZE')
+    expect(codeOf(() => updateQueue(s, { name: 'x'.repeat(121) }, STAFF))).toBe('QUEUE_NAME_TOO_LONG')
+    // Ninguno de los intentos fallidos dejó la cola cambiada.
+    expect(s.queue.gracePeriodSeconds).toBe(120)
+    expect(s.events).toHaveLength(0)
+  })
 })
 
 describe('carriles', () => {
@@ -41,6 +52,27 @@ describe('carriles', () => {
     expect(codeOf(() => retireLane(s, 'lane-default', STAFF))).toBe('LAST_ACTIVE_LANE')
     expect(codeOf(() => updateLane(s, 'lane-default', { name: '1+', minPartySize: 1, priority: 0, active: false }, STAFF)))
       .toBe('LAST_ACTIVE_LANE')
+  })
+
+  it('no se desactiva un carril con gente: en round robin quedaría sin atender', () => {
+    const state = queueState({ callStrategy: 'ROUND_ROBIN' })
+    const s = session(state)
+    createLane(s, 'grupos', { name: 'Grupos', minPartySize: 5, priority: 1 }, STAFF)
+    state.entries.push(entry('grupo', 1, { laneId: 'grupos', partySize: 6 }))
+    expect(
+      codeOf(() => updateLane(s, 'grupos', { name: 'Grupos', minPartySize: 5, priority: 1, active: false }, STAFF)),
+    ).toBe('LANE_HAS_ACTIVE_ENTRIES')
+    expect(codeOf(() => retireLane(s, 'grupos', STAFF))).toBe('LANE_HAS_ACTIVE_ENTRIES')
+  })
+
+  it('un carril con valores fuera de rango se rechaza', () => {
+    const s = session(queueState())
+    expect(codeOf(() => createLane(s, 'raro', { name: 'Raro', minPartySize: 5, priority: 1, timeFactor: 0 }, STAFF))).toBe(
+      'INVALID_LANE_CONFIGURATION',
+    )
+    expect(codeOf(() => createLane(s, 'raro', { name: 'Raro', minPartySize: 1.5, priority: 1 }, STAFF))).toBe(
+      'INVALID_LANE_RANGE',
+    )
   })
 
   it('retirar no borra: el carril queda con fecha de baja', () => {
