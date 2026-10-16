@@ -11,8 +11,16 @@ import type { NextConfig } from 'next'
  * deployment has no CDN available. The query string costs nothing and keeps the hosting
  * configuration down to zero rules.
  */
+/**
+ * Where the site lives under its host. Empty in development; `/prod` when API Gateway serves it,
+ * because a REST API puts the stage name at the start of every path. Next prefixes every link,
+ * asset and router call with it - code that builds a URL by hand has to read the same variable.
+ */
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? ''
+
 const nextConfig: NextConfig = {
   output: 'export',
+  basePath,
   trailingSlash: true,
   reactStrictMode: true,
   images: { unoptimized: true },

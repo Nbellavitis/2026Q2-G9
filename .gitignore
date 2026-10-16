@@ -37,3 +37,15 @@ backend/src/main/resources/application-local.yml
 # Generados por las herramientas de agentes al correr next dev
 AGENTS.md
 CLAUDE.md
+
+# Terraform: el lock file (.terraform.lock.hcl) sí se commitea, para fijar los providers
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+plan.txt
+terraform.tfvars
+infra/terraform/.build/
+
+# Funciones: los bundles se generan en el pipeline
+functions/dist/

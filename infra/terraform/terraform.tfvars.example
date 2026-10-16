@@ -1,0 +1,10 @@
+# Copiar como terraform.tfvars para cambiar algún valor por defecto. Ninguno es obligatorio: con
+# los valores por defecto, Terraform despliega en cualquier cuenta del Learner Lab.
+
+# region                      = "us-east-1"
+# project                     = "q"
+# api_stage_name              = "prod"
+# log_retention_days          = 14
+# access_logs_expiration_days = 30
+# api_throttle_rate_limit     = 50
+# api_throttle_burst_limit    = 100
