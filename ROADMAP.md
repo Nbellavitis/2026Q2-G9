@@ -252,7 +252,8 @@ carreras están cubiertas por tests. **Cumplido**: ver [AVANCE-ENTREGA-3.md](AVA
       resolver la cola con `queueIdOfEntry` y recién ahí verificar la membresía.
 - [x] La vista pública de la cola (la página de ingreso, que se refresca cada 15 s) con
       `read(queueId, { consistent: false })`; el ticket del cliente, siempre consistente.
-- [x] Throttling por método en lugar de uno solo para `*/*`: hoy el techo de 50 rps lo comparten el
+- [x] Throttling por método en lugar de uno solo para `*/*` (desde el audit de funcionamiento: API
+      en 25/50, archivos del sitio en 500/1000, unirse y salir en 10/20): antes el techo de 50 rps lo comparten el
       sitio, los polls y los joins, y veinte personas escaneando el mismo QR piden cientos de
       archivos del sitio a la vez.
 - [x] El frontend reintenta ante `409 CONCURRENT_MODIFICATION` antes de mostrar un error.

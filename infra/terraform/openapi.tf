@@ -56,15 +56,29 @@ locals {
     { for route in local.staff_routes : route => { function = "staff", authorized = true } },
   )
 
-  # Las rutas que escribe un cliente anónimo llevan un techo propio, más bajo que el de la API, en el
-  # formato `ruta/MÉTODO` que piden los method settings de un stage.
-  api_throttled_routes = {
-    for route in ["POST /api/v1/public/queues/{queueId}/entries", "DELETE /api/v1/public/tickets/{ticketToken}"] :
-    format("%s/%s", trimprefix(split(" ", route)[1], "/"), split(" ", route)[0]) => {
-      rate  = var.public_write_rate_limit
-      burst = var.public_write_burst_limit
-    }
-  }
+  # Techos de throttling, en el formato `ruta/MÉTODO` que piden los method settings de un stage. Tres
+  # niveles:
+  #
+  #   */*               la API (y el index.html de la raíz): a la medida de la concurrencia de Lambda
+  #                     del lab. Por encima, API Gateway responde 429 en vez de que Lambda falle con un
+  #                     5xx.
+  #   {proxy+}/GET      los archivos del sitio: no invocan ninguna Lambda, así que su techo es alto.
+  #                     Veinte personas escaneando el mismo QR piden cientos de archivos a la vez, y con
+  #                     el techo de la API la página cargaba rota.
+  #   unirse y salir    más bajo todavía: las escribe cualquiera, sin sesión.
+  #
+  # Son pocas entradas a propósito: cada una es una modificación del mismo stage, y muchas aplicadas
+  # en paralelo pueden chocar entre sí.
+  api_route_throttles = merge(
+    { "{proxy+}/GET" = { rate = var.site_throttle_rate_limit, burst = var.site_throttle_burst_limit } },
+    {
+      for route in ["POST /api/v1/public/queues/{queueId}/entries", "DELETE /api/v1/public/tickets/{ticketToken}"] :
+      format("%s/%s", trimprefix(split(" ", route)[1], "/"), split(" ", route)[0]) => {
+        rate  = var.public_write_rate_limit
+        burst = var.public_write_burst_limit
+      }
+    },
+  )
 
   api_operations = {
     for route, target in local.api_routes : route => merge(target, {

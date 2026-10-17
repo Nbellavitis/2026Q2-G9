@@ -77,7 +77,8 @@ jobs:
 
   build:
     name: Compilar
-    if: github.event.action != 'labeled' || github.event.label.name == 'destroy'
+    # Destroy no lo necesita (ver el job destroy): así un error de compilación no impide limpiar.
+    if: github.event.action != 'labeled' && inputs.action != 'destroy'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -99,9 +100,8 @@ jobs:
 
       # Los unitarios del dominio y los de integración contra DynamoDB Local (Testcontainers usa el
       # Docker que ya trae el runner). Incluyen las carreras del control optimista: si alguna se
-      # rompe, no se despliega. Al destruir no corren: un test roto no puede impedir limpiar la cuenta.
+      # rompe, no se despliega.
       - name: Tests de las funciones
-        if: github.event.action != 'labeled' && inputs.action != 'destroy'
         working-directory: functions
         run: npm test
 
@@ -306,7 +306,8 @@ jobs:
     concurrency:
       group: terraform-state
       cancel-in-progress: false
-    needs: build
+    # Sin `needs: build`: limpiar la cuenta del lab no puede depender de que el código compile. Si no,
+    # un error de TypeScript dejaría todo desplegado, gastando, hasta arreglarlo.
     if: >-
       (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'destroy') ||
       (github.event_name == 'workflow_dispatch' && inputs.action == 'destroy')
@@ -315,10 +316,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
 
-      # Destroy también evalúa la configuración, y los zips de las funciones se leen en el plan.
-      - uses: actions/download-artifact@v8.0.1
-        with:
-          name: build
+      # Destroy también evalúa la configuración, y `archive_file` exige que existan los bundles. Para
+      # borrar no hace falta el código real: alcanza con un archivo por función. Sin el build del
+      # sitio, `fileset` queda vacío y la página 404 cae en su versión mínima.
+      - name: Bundles vacíos para evaluar la configuración
+        run: |
+          for handler in functions/src/handlers/*.ts; do
+            name=$(basename "$handler" .ts)
+            mkdir -p "functions/dist/$name"
+            echo 'export const handler = async () => ({})' > "functions/dist/$name/index.mjs"
+          done
 
       - uses: ./.github/actions/terraform-init
         with:

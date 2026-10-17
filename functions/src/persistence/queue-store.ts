@@ -346,6 +346,37 @@ export class QueueStore {
     return (Items ?? []) as Item[]
   }
 
+  /**
+   * Los eventos de una cola desde un instante, del más nuevo al más viejo.
+   *
+   * Los eventos se ordenan por versión de la cola, que crece con el tiempo: se recorren hacia atrás y
+   * se corta en el primero anterior a `since`. Así el historial de una entrada lee solo lo que pasó
+   * en la cola desde que esa persona se unió, y no los 30 días que guarda la tabla: en una cola con
+   * movimiento eso eran decenas de megabytes por consulta.
+   */
+  async eventsSince(queueId: string, since: string): Promise<Item[]> {
+    const found: Item[] = []
+    let start: Record<string, unknown> | undefined
+    do {
+      const page = await this.table.documents.send(
+        new QueryCommand({
+          TableName: this.table.tableName,
+          KeyConditionExpression: 'PK = :pk',
+          ExpressionAttributeValues: { ':pk': keys.eventsPk(queueId) },
+          ScanIndexForward: false,
+          Limit: 100,
+          ExclusiveStartKey: start,
+        }),
+      )
+      for (const item of (page.Items ?? []) as Item[]) {
+        if (String(item['occurredAt'] ?? '') < since) return found
+        found.push(item)
+      }
+      start = page.LastEvaluatedKey
+    } while (start)
+    return found
+  }
+
   /** Los eventos de una cola, del más viejo al más nuevo. */
   async events(queueId: string): Promise<Item[]> {
     return this.queryAll({

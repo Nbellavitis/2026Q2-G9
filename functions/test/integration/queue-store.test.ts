@@ -144,6 +144,22 @@ describe('QueueStore contra DynamoDB Local', () => {
     expect(cheap.entries.map((entry) => entry.customerName)).toEqual(['Ana'])
   })
 
+  it('el historial desde un instante corta en el primer evento anterior, sin leer el resto', async () => {
+    const queueId = await createQueue(f.queues)
+    for (const [minute, name] of [
+      ['10', 'Viejo'],
+      ['20', 'Medio'],
+      ['30', 'Nuevo'],
+    ] as const) {
+      await f.queues.mutate(queueId, (s) => join(s, { name, email: `${name.toLowerCase()}@x.y` }), {
+        now: at(`2026-03-02T15:${minute}:00Z`),
+      })
+    }
+    const since = await f.queues.eventsSince(queueId, '2026-03-02T15:20:00.000Z')
+    // Del más nuevo al más viejo, y nada anterior al instante pedido (ni el QUEUE_CREATED).
+    expect(since.map((event) => event['occurredAt'])).toEqual(['2026-03-02T15:30:00.000Z', '2026-03-02T15:20:00.000Z'])
+  })
+
   it('una cola que no existe es un 404 del dominio', async () => {
     await expect(f.queues.load('no-existe')).rejects.toMatchObject({ code: 'QUEUE_NOT_FOUND', status: 404 })
   })

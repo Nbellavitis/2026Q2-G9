@@ -48,13 +48,14 @@ resource "aws_api_gateway_stage" "this" {
   stage_name    = var.api_stage_name
 }
 
-# Un techo para toda la API, y uno más bajo para las rutas que escriben y puede pedir cualquiera. Por
-# encima, API Gateway responde 429 sin invocar ninguna Lambda: con la concurrencia de Lambda limitada
-# en el lab, es la primera defensa contra una ráfaga.
+# Un techo a la medida de Lambda para la API, uno alto para los archivos del sitio y uno más bajo
+# para las rutas que escribe cualquiera (openapi.tf explica los tres). Por encima, API Gateway
+# responde 429 sin invocar ninguna Lambda: con la concurrencia de Lambda limitada en el lab, es la
+# primera defensa contra una ráfaga.
 resource "aws_api_gateway_method_settings" "this" {
   for_each = merge(
     { "*/*" = { rate = var.api_throttle_rate_limit, burst = var.api_throttle_burst_limit } },
-    local.api_throttled_routes,
+    local.api_route_throttles,
   )
 
   rest_api_id = aws_api_gateway_rest_api.this.id

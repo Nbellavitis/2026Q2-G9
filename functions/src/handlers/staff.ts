@@ -386,7 +386,10 @@ export function staffRoutes(deps: StaffDependencies): Routes {
     'GET /api/v1/entries/{entryId}/events': async (request) => {
       const entryId = request.param('entryId')
       const { queueId } = await authorizeEntry(request, entryId)
-      const found = (await queues.events(queueId)).filter((item) => item['entryId'] === entryId).reverse()
+      const entry = await queues.loadEntryById(entryId)
+      if (!entry) throw notFound('ENTRY_NOT_FOUND', `Entry ${entryId} was not found`)
+      // Solo lo que pasó en la cola desde que esta persona se unió, no todo su historial.
+      const found = (await queues.eventsSince(queueId, entry.joinedAt)).filter((item) => item['entryId'] === entryId)
       return json(200, eventsOf(found))
     },
 

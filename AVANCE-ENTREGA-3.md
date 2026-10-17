@@ -635,12 +635,13 @@ que bloquee el `apply`. Cada hallazgo se verificó antes de corregirlo.
 
 ### Pendiente, a decidir
 
-- **Concurrencia de Lambda en 10.** Los consumidores pueden tomar 6 y a la API le quedan 2-3. El
-  stage acepta 50 rps con ráfaga de 100: ante un pico Lambda limita y responde 5xx en vez de 429.
-  Opción: bajar `api_throttle_*` a 10/20 en el lab.
+- ~~**Concurrencia de Lambda en 10.** Los consumidores pueden tomar 6 y a la API le quedan 2-3. El
+  stage acepta 50 rps con ráfaga de 100: ante un pico Lambda limita y responde 5xx en vez de 429.~~
+  Resuelto en el audit de funcionamiento y despliegue: la API baja a 25/50 por ruta y el sitio, que
+  no usa Lambdas, sube a 500/1000.
 - **Sesión del staff sin refresh.** El refresh token se descarta: la sesión muere a las 12 h.
-- **`destroy` necesita compilar.** Depende del build, así que un error de TypeScript impide
-  limpiar la cuenta.
+- ~~**`destroy` necesita compilar.** Depende del build, así que un error de TypeScript impide
+  limpiar la cuenta.~~ Resuelto en el audit de funcionamiento y despliegue.
 - **`partySize` sin límite común.** Availability acepta 80 y el join corta en 50; `requirePartySize`
   se guarda pero no se aplica.
 - **Para mirar en el lab:**
@@ -655,3 +656,29 @@ que bloquee el `apply`. Cada hallazgo se verificó antes de corregirlo.
 
 117 tests (unit + integración), typecheck de functions y frontend, build del frontend con `/prod`,
 `terraform fmt`/`validate`, tflint y actionlint.
+
+---
+
+## Audit de funcionamiento y despliegue (Fases 1 a 5)
+
+Revisión del código de las cinco fases y del despliegue, buscando lo que pueda costar usuarios o
+plata en el lab o en la demo. Corregido:
+
+| Hallazgo | Qué pasaba | Arreglo |
+|---|---|---|
+| El sitio compartía el throttling con la API | Un solo techo de 50 rps para todo: veinte personas escaneando el mismo QR piden cientos de archivos a la vez y recibían 429, con la página cargando rota. Y al revés, 50 rps por ruta era más de lo que la concurrencia de Lambda del lab puede atender | `*/*` (la API) en 25/50; los archivos del sitio (`{proxy+}/GET`), que no usan Lambdas, en 500/1000; unirse y salir siguen en 10/20. Son 4 method settings, no uno por ruta, para no multiplicar las modificaciones del stage en paralelo |
+| 20 joins por IP por minuto | Un local o un aula salen a internet por un único NAT: con una sala entera escaneando el QR, el join número 21 recibía 429 | 60 por minuto, documentado en la variable |
+| Historial de una entrada | `GET /entries/{id}/events` leía todos los eventos de la cola de los últimos 30 días y filtraba en memoria: en una cola con movimiento, decenas de MB por consulta y riesgo de timeout | `eventsSince`: recorre los eventos hacia atrás y corta en el primero anterior a la hora en que esa persona se unió. Test de integración |
+| `destroy` dependía del build | Un error de TypeScript o del frontend impedía limpiar la cuenta, y todo seguía desplegado y gastando | El job `destroy` ya no necesita `build`: genera un bundle vacío por función (alcanza para que `archive_file` evalúe) y, sin el sitio, `fileset` queda vacío. El job `build` no corre al destruir |
+
+Para mirar, sin corregir:
+
+| Tema | Riesgo | Sugerencia |
+|---|---|---|
+| Conexiones WebSocket por ticket | Con un mismo ticket se pueden abrir conexiones sin límite, y cada movimiento de la cola le empuja a todas | Limitar las conexiones por ticket en `$connect` si aparece abuso |
+| Registro sin verificar el email | El pre sign-up confirma la cuenta sin probar que el email es de quien se registra. Un dueño que agrega a un miembro "sin contraseña" por email puede estar sumando a quien registró ese email antes | Aceptable con el sandbox de SES; en producción, verificar el email |
+| Cierre de una cola grande | El notifier manda un aviso `QUEUE_CLOSED` por persona; SES tiene un ritmo máximo de envío y los que superen los reintentos quedan en la DLQ | Aceptable en el lab (solo direcciones verificadas) |
+| Decisiones de producto del audit anterior | Contacto repetido en la misma cola, ausencias infinitas con `KEEP_POSITION`, reabrir a mitad de una liberación | Siguen abiertas |
+
+Verificado: 118 tests, typecheck, `terraform fmt`/`validate` (también con los bundles vacíos del
+job `destroy`), tflint y actionlint. **Nada de las Fases 1 a 5 corrió todavía en el lab.**

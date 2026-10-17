@@ -61,22 +61,34 @@ variable "access_logs_expiration_days" {
   default     = 30
 }
 
+variable "site_throttle_rate_limit" {
+  description = "Pedidos por segundo sostenidos a los archivos del sitio estático. No invocan Lambdas: puede ser alto, y tiene que serlo para que una sala entera escaneando el mismo QR cargue la página."
+  type        = number
+  default     = 500
+}
+
+variable "site_throttle_burst_limit" {
+  description = "Ráfaga máxima de pedidos al sitio estático."
+  type        = number
+  default     = 1000
+}
+
 variable "api_throttle_rate_limit" {
-  description = "Pedidos por segundo sostenidos que acepta la API antes de responder 429."
+  description = "Pedidos por segundo sostenidos por ruta de la API (y en el WebSocket) antes de responder 429. A la medida de la concurrencia de Lambda del lab."
+  type        = number
+  default     = 25
+}
+
+variable "api_throttle_burst_limit" {
+  description = "Ráfaga máxima por ruta de la API (y en el WebSocket)."
   type        = number
   default     = 50
 }
 
-variable "api_throttle_burst_limit" {
-  description = "Pedidos que la API acepta de golpe en una ráfaga."
-  type        = number
-  default     = 100
-}
-
 variable "joins_per_minute" {
-  description = "Uniones a una cola que acepta la API por IP y por minuto, antes de responder 429."
+  description = "Uniones a una cola que acepta la API por IP y por minuto, antes de responder 429. Tiene que cubrir una sala entera detrás de la misma IP (el Wi-Fi de un local o de un aula sale por un único NAT)."
   type        = number
-  default     = 20
+  default     = 60
 
   validation {
     condition     = var.joins_per_minute >= 1
