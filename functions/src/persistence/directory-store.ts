@@ -15,6 +15,13 @@ import * as keys from './keys.js'
  */
 export const NOTIFICATION_LEASE_SECONDS = 120
 
+/**
+ * Intentos de envío de un mismo aviso, contando los que murieron sin informar. Pasado el tope, un
+ * aviso que falla siempre deja de reintentarse: sin tope, cada evento nuevo de la cola volvería a
+ * intentar un email que nunca va a salir, y cada intento es una invocación que se paga.
+ */
+export const NOTIFICATION_MAX_ATTEMPTS = 5
+
 export interface QueueListing {
   queueId: string
   name: string
@@ -109,27 +116,65 @@ export class DirectoryStore {
    * Reserva un aviso antes de enviarlo (arquitectura-serverless.md §6.5). Pasa si nunca se intentó,
    * si el intento anterior falló, o si quedó PENDING más de `leaseSeconds`: eso significa que la
    * Lambda que lo reservó murió antes de enviarlo, y sin este caso el aviso no saldría nunca (el
-   * mismo defecto que tenía `retryFailed` en la versión Java). Si ya se envió, devuelve false.
+   * mismo defecto que tenía `retryFailed` en la versión Java).
+   *
+   * Cada reserva cuenta como un intento, porque un intento que muere sin informar también es un
+   * intento. Devuelve false si ya se envió o si agotó `maxAttempts`.
+   *
+   * Es un Update y no un Put: un Put reescribiría el ítem entero y el contador volvería a cero en
+   * cada reserva.
    */
-  async claimNotification(record: NotificationRecord, now = new Date(), leaseSeconds = NOTIFICATION_LEASE_SECONDS): Promise<boolean> {
+  async claimNotification(
+    record: NotificationRecord,
+    now = new Date(),
+    leaseSeconds = NOTIFICATION_LEASE_SECONDS,
+    maxAttempts = NOTIFICATION_MAX_ATTEMPTS,
+  ): Promise<boolean> {
     try {
       await this.table.documents.send(
-        new PutCommand({
+        new UpdateCommand({
           TableName: this.table.tableName,
-          Item: {
-            PK: keys.entryPk(record.entryId),
-            SK: keys.notificationSk(record.type, record.cycle),
-            kind: 'NOTIFICATION',
-            ...record,
-            claimedAt: now.toISOString(),
+          Key: { PK: keys.entryPk(record.entryId), SK: keys.notificationSk(record.type, record.cycle) },
+          UpdateExpression: [
+            'SET #kind = :kind, #entryId = :entryId, #type = :type, #cycle = :cycle, #status = :pending,',
+            '#channel = :channel, #destination = :destination, #claimedAt = :now,',
+            '#createdAt = if_not_exists(#createdAt, :createdAt),',
+            '#sentAt = if_not_exists(#sentAt, :null), #failureReason = if_not_exists(#failureReason, :null)',
+            'ADD #attempts :one',
+          ].join(' '),
+          ConditionExpression: [
+            '(attribute_not_exists(PK) OR #status = :failed OR (#status = :pending AND #claimedAt < :staleBefore))',
+            'AND (attribute_not_exists(#attempts) OR #attempts < :maxAttempts)',
+          ].join(' '),
+          ExpressionAttributeNames: {
+            '#kind': 'kind',
+            '#entryId': 'entryId',
+            '#type': 'type',
+            '#cycle': 'cycle',
+            '#status': 'status',
+            '#channel': 'channel',
+            '#destination': 'destination',
+            '#claimedAt': 'claimedAt',
+            '#createdAt': 'createdAt',
+            '#sentAt': 'sentAt',
+            '#failureReason': 'failureReason',
+            '#attempts': 'attempts',
           },
-          ConditionExpression:
-            'attribute_not_exists(PK) OR #status = :failed OR (#status = :pending AND claimedAt < :staleBefore)',
-          ExpressionAttributeNames: { '#status': 'status' },
           ExpressionAttributeValues: {
-            ':failed': 'FAILED',
+            ':kind': 'NOTIFICATION',
+            ':entryId': record.entryId,
+            ':type': record.type,
+            ':cycle': record.cycle,
             ':pending': 'PENDING',
+            ':failed': 'FAILED',
+            ':channel': record.channel,
+            ':destination': record.destination,
+            ':now': now.toISOString(),
+            ':createdAt': record.createdAt,
+            ':null': null,
+            ':one': 1,
             ':staleBefore': new Date(now.getTime() - leaseSeconds * 1000).toISOString(),
+            ':maxAttempts': maxAttempts,
           },
         }),
       )
@@ -140,6 +185,7 @@ export class DirectoryStore {
     }
   }
 
+  /** Registra el resultado del intento. El intento ya lo contó `claimNotification`. */
   async markNotification(
     entryId: string,
     type: NotificationRecord['type'],
@@ -152,13 +198,13 @@ export class DirectoryStore {
         Key: { PK: keys.entryPk(entryId), SK: keys.notificationSk(type, cycle) },
         UpdateExpression:
           outcome.status === 'SENT'
-            ? 'SET #status = :status, sentAt = :at, failureReason = :none ADD attempts :one'
-            : 'SET #status = :status, failureReason = :reason ADD attempts :one',
+            ? 'SET #status = :status, sentAt = :at, failureReason = :none'
+            : 'SET #status = :status, failureReason = :reason',
         ExpressionAttributeNames: { '#status': 'status' },
         ExpressionAttributeValues:
           outcome.status === 'SENT'
-            ? { ':status': 'SENT', ':at': outcome.at, ':none': null, ':one': 1 }
-            : { ':status': 'FAILED', ':reason': outcome.reason, ':one': 1 },
+            ? { ':status': 'SENT', ':at': outcome.at, ':none': null }
+            : { ':status': 'FAILED', ':reason': outcome.reason },
       }),
     )
   }

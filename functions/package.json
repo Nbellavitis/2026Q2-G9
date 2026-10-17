@@ -5,7 +5,7 @@
   "description": "Funciones Lambda de Queue. Cada archivo de src/handlers/ es una función.",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.22"
   },
   "scripts": {
     "build": "node build.mjs",

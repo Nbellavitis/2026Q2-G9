@@ -28,6 +28,11 @@ export const MAX_TRANSACTION_ITEMS = 100
  * 500 ms sigue entrando holgado en el timeout de la función.
  */
 export const DEFAULT_MAX_ATTEMPTS = 8
+/**
+ * Relecturas de una cola cuya versión cambió mientras se leía. Cada una dura lo que tres consultas,
+ * así que hace falta un ritmo de escrituras sostenido muy por encima del de una fila para agotarlas.
+ */
+export const MAX_SNAPSHOT_ATTEMPTS = 5
 
 type TransactItem = NonNullable<TransactWriteCommandInput['TransactItems']>[number]
 
@@ -67,23 +72,47 @@ export class QueueStore {
   async load(queueId: string, entryIds: readonly string[] = [], options: { consistent?: boolean } = {}): Promise<QueueState> {
     const consistent = options.consistent ?? true
     const pk = keys.queuePk(queueId)
-    const [config, inService, waiting] = await Promise.all([
+
+    for (let attempt = 0; attempt < MAX_SNAPSHOT_ATTEMPTS; attempt++) {
       // `LANE#…` < `META` en orden de bytes: un solo rango trae los carriles y la configuración.
-      this.queryAll(
+      const config = await this.queryAll(
         {
           KeyConditionExpression: 'PK = :pk AND SK BETWEEN :from AND :to',
           ExpressionAttributeValues: { ':pk': pk, ':from': 'LANE#', ':to': keys.QUEUE_META_SK },
         },
         consistent,
-      ),
-      this.queryPrefix(pk, keys.IN_SERVICE_PREFIX, consistent),
-      this.queryPrefix(pk, keys.WAITING_PREFIX, consistent),
-    ])
+      )
+      const metaItem = config.find((item) => item['SK'] === keys.QUEUE_META_SK)
+      if (!metaItem) throw notFound('QUEUE_NOT_FOUND', `Queue ${queueId} was not found`)
 
-    const metaItem = config.find((item) => item['SK'] === keys.QUEUE_META_SK)
-    if (!metaItem) throw notFound('QUEUE_NOT_FOUND', `Queue ${queueId} was not found`)
+      const [inService, waiting] = await Promise.all([
+        this.queryPrefix(pk, keys.IN_SERVICE_PREFIX, consistent),
+        this.queryPrefix(pk, keys.WAITING_PREFIX, consistent),
+      ])
 
-    const entries = [...inService, ...waiting].map((item) => items.strip<Entry>(item))
+      // Tres consultas no son una foto: si otra transacción se confirmó entre ellas, cada grupo de
+      // entradas puede reflejar un momento distinto (alguien recién llamado no aparece ni en la fila
+      // ni entre los llamados). El control de versión no lo detecta si la versión que se leyó ya es
+      // la nueva. Toda transacción sobre la cola sube `version`, así que si sigue igual después de
+      // leer las entradas, nada se confirmó en el medio y la foto es de un único instante.
+      //
+      // Con lecturas eventualmente consistentes no hay foto posible: son para vistas que toleran
+      // un atraso, y ninguna mutación las usa.
+      if (consistent && (await this.versionOf(queueId)) !== metaItem['version']) continue
+
+      return this.assemble(queueId, config, metaItem, [...inService, ...waiting], entryIds)
+    }
+    throw conflict('CONCURRENT_MODIFICATION', 'The queue changed while it was being read. Please try again.')
+  }
+
+  private async assemble(
+    queueId: string,
+    config: Item[],
+    metaItem: Item,
+    activeItems: Item[],
+    entryIds: readonly string[],
+  ): Promise<QueueState> {
+    const entries = activeItems.map((item) => items.strip<Entry>(item))
     const missing = entryIds.filter((id) => !entries.some((entry) => entry.id === id))
     for (const entry of await Promise.all(missing.map((id) => this.loadEntryById(id)))) {
       if (entry && entry.queueId === queueId) entries.push(entry)
@@ -288,6 +317,19 @@ export class QueueStore {
       KeyConditionExpression: 'PK = :pk',
       ExpressionAttributeValues: { ':pk': keys.eventsPk(queueId) },
     })
+  }
+
+  /** La versión actual de una cola, con lectura fuerte y sin traer el resto de la configuración. */
+  private async versionOf(queueId: string): Promise<unknown> {
+    const { Item } = await this.table.documents.send(
+      new GetCommand({
+        TableName: this.table.tableName,
+        Key: { PK: keys.queuePk(queueId), SK: keys.QUEUE_META_SK },
+        ConsistentRead: true,
+        ProjectionExpression: 'version',
+      }),
+    )
+    return Item?.['version']
   }
 
   private async get(pk: string, sk: string): Promise<Item | null> {

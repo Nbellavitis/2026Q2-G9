@@ -6,7 +6,7 @@ fase anota qué se construyó, qué se decidió en el camino y por qué, qué se
 | Fase | Estado |
 |---|---|
 | 1 · Esqueleto que camina: Terraform y pipeline | **Código completo y verificado localmente. Falta correrlo en el lab.** |
-| 2 · Dominio y persistencia en DynamoDB | **Completa y verificada localmente** (92 tests, DynamoDB Local). La tabla `q-connections` falta crearla en el lab |
+| 2 · Dominio y persistencia en DynamoDB | **Completa y verificada localmente** (94 tests, DynamoDB Local). La tabla `q-connections` falta crearla en el lab |
 | 3 · API síncrona y Cognito | Pendiente |
 | 4 · Bus de eventos | Pendiente |
 | 5 · Consumidores y tiempo real | Pendiente |
@@ -190,7 +190,7 @@ functions/
     queue-store.ts           carga consistente, transacción con versión, reintentos
     directory-store.ts       establecimientos, membresías, avisos, límite por IP
   test/domain/               73 tests unitarios (vitest)
-  test/integration/          19 tests contra DynamoDB Local (Testcontainers)
+  test/integration/          21 tests contra DynamoDB Local (Testcontainers)
   vitest.config.ts           proyectos `unit` e `integration`
 infra/terraform/tables.tf    + q-connections, con el mismo módulo externo
 .github/workflows/terraform.yml  + `npm test` en el job build
@@ -238,7 +238,7 @@ infra/terraform/tables.tf    + q-connections, con el mismo módulo externo
 |---|---|
 | `npm run typecheck` | Sin errores (incluye los tests) |
 | `npm run test:unit` | 73 tests: orden, selector, estimación, operaciones, las cuatro políticas, carriles, métricas por zona horaria, avisos |
-| `npm run test:integration` | 19 tests contra DynamoDB Local 3.3.1: ciclo completo, mover SK y referencia, eventos en la transacción, vencimiento al leer, cierre en lotes, rechazo de transacciones de más de 100 ítems, membresías, deduplicación de avisos y límite por IP |
+| `npm run test:integration` | 21 tests contra DynamoDB Local 3.3.1: ciclo completo, mover SK y referencia, eventos en la transacción, vencimiento al leer, cierre en lotes, rechazo de transacciones de más de 100 ítems, membresías, deduplicación de avisos y límite por IP |
 | Carreras de §6.1 | 5 tests (dos y tres llamados simultáneos, dos joins, último lugar, gracia contra staff). Una barrera fuerza que todos lean la misma versión antes de escribir. Corridos 4 veces seguidas sin fallas |
 | `npm run build` | Sin cambios: el dominio todavía no lo usa ningún handler |
 | Terraform `fmt`, `validate` y `tflint` | Sin errores (con las versiones del pipeline, en Docker) |
@@ -276,6 +276,22 @@ costar plata o usuarios. Corregido, con tests:
 Requisitos que el audit deja para las fases siguientes (anotados en el ROADMAP): IP desde
 `sourceIp`, body en base64 por `binary_media_types`, autorización contra la cola leída, throttling
 por método, reintento del frontend ante 409, y tope de reintentos en colas y stream.
+
+
+### Revisión cruzada
+
+Revisión de la fase por otro integrante, con los tests corridos en Node 22 (el del pipeline).
+Corregido, cada uno con un test que falla sin el arreglo:
+
+| Problema | Riesgo | Arreglo |
+|---|---|---|
+| `QueueStore.load` leía la configuración, los llamados y la fila en tres consultas en paralelo, y tres consultas no son una foto. Si otra transacción se confirmaba en el medio, alguien recién llamado podía no aparecer ni en la fila ni entre los llamados, y si la versión leída ya era la nueva, **el control de versión no lo detectaba** | Reproducido: en una cola llena (máximo 2), un join concurrente con un llamado entraba y la cola quedaba con 3 activas. Lo mismo vale para la capacidad de los carriles, el round robin y cualquier regla que cuente o recorra a todos | La configuración se lee primero, las entradas después, y al final se vuelve a leer la versión: si cambió, se relee todo (hasta 5 veces). Una lectura más por operación. Las lecturas eventualmente consistentes de la vista pública no lo necesitan: no deciden nada |
+| `claimNotification` reservaba con un `Put` que reescribía el ítem entero | El contador `attempts` volvía a cero en cada reserva, y un aviso `FAILED` se podía reintentar sin tope: cada evento nuevo de la cola volvía a intentar un email que nunca iba a salir | Reserva con `Update`: cada reserva suma un intento (también cuenta el que murió sin informar), se conserva el `createdAt` original, y pasados `NOTIFICATION_MAX_ATTEMPTS` (5) deja de reservarse |
+| `package.json` declaraba Node 20 | `testcontainers` 12.2 exige Node 22.22: con Node 20 los tests de integración caen con un error interno de `undici` | `engines` en `>=22.22` |
+
+Queda para la Fase 3: si una transacción falla por una condición que no es la de la versión (por
+ejemplo, el `attribute_not_exists` que protege los movimientos), `commit` relanza la excepción de
+AWS tal cual. Los handlers tienen que traducirla a `409`, no dejar que salga como `500`.
 
 ### Sin verificar: necesita el lab
 

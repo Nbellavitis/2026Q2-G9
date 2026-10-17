@@ -1,7 +1,10 @@
+import { QueryCommand } from '@aws-sdk/lib-dynamodb'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { callNext, join, startServing } from '../../src/domain/entries.js'
 import { expireDue } from '../../src/domain/grace.js'
 import { staff } from '../../src/domain/state.js'
+import type { TableConfig } from '../../src/persistence/client.js'
+import { QueueStore } from '../../src/persistence/queue-store.js'
 import type { Fixture } from './support.js'
 import { barrier, createQueue, fixture } from './support.js'
 
@@ -112,5 +115,48 @@ describe('carreras', () => {
       expect(entry?.status).toBe('WAITING')
       expect(outcomes[0]).toMatchObject({ status: 'rejected', reason: { code: 'INVALID_TRANSITION' } })
     }
+  })
+
+  it('una lectura que se cruza con un commit ajeno no arma la cola con dos momentos distintos', async () => {
+    // Cola llena: X e Y esperan y el máximo es 2. Mientras alguien intenta unirse, el staff llama a X.
+    const queueId = await queueWith(2, { maxSize: 2 })
+
+    // Un store cuya consulta de llamados (A#) responde enseguida y cuya fila (W#) espera a que el
+    // llamado se confirme: X ya no está en la fila y todavía no estaba entre los llamados. Sin la
+    // verificación de versión, ese join veía una sola persona activa y entraba: tres en una cola de dos.
+    let release: () => void = () => {}
+    const committed = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let inServiceRead: () => void = () => {}
+    const sawInService = new Promise<void>((resolve) => {
+      inServiceRead = resolve
+    })
+    let delayOnce = true
+    const send = f.table.documents.send.bind(f.table.documents)
+    const torn: TableConfig = { ...f.table, documents: Object.create(f.table.documents) }
+    torn.documents.send = (async (command: unknown) => {
+      if (delayOnce && command instanceof QueryCommand) {
+        const prefix = command.input.ExpressionAttributeValues?.[':prefix']
+        if (prefix === 'A#') {
+          const page = await send(command as never)
+          inServiceRead()
+          return page
+        }
+        if (prefix === 'W#') {
+          delayOnce = false
+          await committed
+        }
+      }
+      return send(command as never)
+    }) as typeof torn.documents.send
+
+    const joining = new QueueStore(torn).mutate(queueId, (s) => join(s, { name: 'Z', email: 'z@x.y' }), { maxAttempts: 1 })
+    await sawInService
+    await f.queues.mutate(queueId, (s) => callNext(s, staff('a')))
+    release()
+
+    await expect(joining).rejects.toMatchObject({ code: 'QUEUE_FULL' })
+    expect((await f.queues.load(queueId)).entries).toHaveLength(2)
   })
 })
