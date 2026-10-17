@@ -33,6 +33,12 @@ backend/src/main/resources/application-local.yml
 .env
 .env.local
 !.env.example
+# La configuración del despliegue manual del TP2: contraseña de RDS y app password de Gmail en
+# texto plano. El repositorio es público.
+app.env
+
+# El build del frontend zipeado para subirlo a mano en el TP2
+frontend/web.zip
 
 # Generados por las herramientas de agentes al correr next dev
 AGENTS.md
