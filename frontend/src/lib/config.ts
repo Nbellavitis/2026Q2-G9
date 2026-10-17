@@ -12,6 +12,8 @@ export interface RuntimeConfig {
   region: string
   userPoolId: string
   userPoolClientId: string
+  /** The realtime WebSocket. Absent in development, where the local backend streams over SSE. */
+  websocketUrl?: string
 }
 
 let pending: Promise<RuntimeConfig> | null = null

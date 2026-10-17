@@ -1,3 +1,4 @@
+import { loadRuntimeConfig } from './config'
 import { getToken, setToken } from './session'
 import type {
   UserView,
@@ -208,6 +209,27 @@ export const api = {
   },
 
   /**
+   * The realtime WebSocket, when the deployment has one. Each resolves to the address to open, or
+   * `null` when there is no WebSocket to open, in which case the live views keep polling.
+   *
+   * The browser cannot send headers when opening a WebSocket, so the credential travels in the URL:
+   * a customer's ticket token (already public in their own page's address), or for staff a one-time
+   * ticket that expires in a minute - never the Cognito token itself.
+   */
+  realtime: {
+    queue: async (queueId: string): Promise<string | null> => {
+      const base = await websocketBase()
+      if (!base) return null
+      const { ticket } = await request<{ ticket: string }>(`/queues/${queueId}/ws-tickets`, { method: 'POST', body: {} })
+      return `${base}?wsTicket=${encodeURIComponent(ticket)}`
+    },
+    ticket: async (ticketToken: string): Promise<string | null> => {
+      const base = await websocketBase()
+      return base ? `${base}?ticket=${encodeURIComponent(ticketToken)}` : null
+    },
+  },
+
+  /**
    * Server-Sent Events, only against the local Java backend (`NEXT_PUBLIC_STREAMS=sse` in
    * `.env.development`). The serverless API has no streams: until its WebSocket exists, `null` makes
    * the live views fall back to polling - and keeps the staff token out of a URL.
@@ -218,4 +240,12 @@ export const api = {
       STREAMS ? `${V1}/queues/${queueId}/stream?access_token=${encodeURIComponent(token)}` : null,
     ticket: (ticketToken: string): string | null => (STREAMS ? `${V1}/public/tickets/${ticketToken}/stream` : null),
   },
+}
+
+async function websocketBase(): Promise<string | null> {
+  try {
+    return (await loadRuntimeConfig()).websocketUrl ?? null
+  } catch {
+    return null
+  }
 }

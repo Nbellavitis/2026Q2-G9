@@ -134,3 +134,36 @@ variable "email_alertas" {
     error_message = "email_alertas tiene que ser una dirección válida."
   }
 }
+
+variable "consumer_max_concurrency" {
+  description = "Ejecuciones simultáneas como máximo de cada consumidor de cola. 2 es el mínimo que admite AWS."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.consumer_max_concurrency >= 2 && var.consumer_max_concurrency <= 1000
+    error_message = "AWS admite de 2 a 1000."
+  }
+}
+
+variable "ses_sender_email" {
+  description = "Remitente de los avisos a clientes. null deja los avisos simulados en los logs del notifier."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.ses_sender_email == null || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.ses_sender_email))
+    error_message = "ses_sender_email tiene que ser una dirección válida."
+  }
+}
+
+variable "ses_verified_recipients" {
+  description = "Direcciones que pueden recibir avisos reales mientras la cuenta esté en el sandbox de SES (las del grupo)."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for email in var.ses_verified_recipients : can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", email))])
+    error_message = "Todas las direcciones tienen que ser válidas."
+  }
+}

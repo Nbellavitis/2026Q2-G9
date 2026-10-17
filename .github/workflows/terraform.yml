@@ -239,6 +239,11 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
 
+      # La prueba del tiempo real usa el WebSocket que Node trae desde la versión 22.
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Apply
         working-directory: ${{ env.TF_DIR }}
         run: terraform apply -input=false -no-color tfplan
@@ -275,8 +280,8 @@ jobs:
             token=$(jq -r .ticketToken join.json)
             curl -fsS "${api}/public/tickets/${token}" | jq -e '.status == "WAITING"' >/dev/null \
               || { echo "El ticket no quedó esperando"; exit 1; }
-            curl -fsS -X DELETE "${api}/public/tickets/${token}" | jq -e '.status == "LEFT"' >/dev/null \
-              || { echo "No se pudo dejar la cola"; exit 1; }
+            # Irse de la cola con el WebSocket abierto: el aviso tiene que llegar por el push.
+            node ../../.github/scripts/smoke-realtime.mjs "$(terraform output -raw websocket_url)" "$token" "$api"
           fi
 
           {

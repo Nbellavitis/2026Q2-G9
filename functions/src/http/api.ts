@@ -60,7 +60,7 @@ const TITLES: Record<number, string> = {
 const NO_STORE = { 'Cache-Control': 'no-store' }
 
 // La API Java omitía los campos null (Jackson `non_null`) y el frontend los trata como ausentes.
-const omitNulls = (key: string, value: unknown) => (value === null && key !== '' ? undefined : value)
+export const omitNulls = (key: string, value: unknown) => (value === null && key !== '' ? undefined : value)
 
 export function json(status: number, body: unknown, headers: Record<string, string> = {}): APIGatewayProxyResult {
   return {

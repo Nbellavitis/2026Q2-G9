@@ -38,6 +38,7 @@ locals {
     "PUT /api/v1/queues/{queueId}/status",
     "GET /api/v1/queues/{queueId}/board",
     "POST /api/v1/queues/{queueId}/calls",
+    "POST /api/v1/queues/{queueId}/ws-tickets",
     "GET /api/v1/queues/{queueId}/events",
     "GET /api/v1/queues/{queueId}/metrics",
     "GET /api/v1/queues/{queueId}/lanes",
@@ -83,7 +84,7 @@ locals {
           "x-amazon-apigateway-integration" = {
             type                = "aws_proxy"
             httpMethod          = "POST"
-            uri                 = module.functions[operation.function].invoke_arn
+            uri                 = module.api_functions[operation.function].invoke_arn
             passthroughBehavior = "when_no_match"
           }
         },

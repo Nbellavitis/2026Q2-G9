@@ -1,6 +1,7 @@
 // Todo lo que no es la fila: establecimientos, membresías, avisos y el límite por IP.
 
-import { GetCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
+import { DeleteCommand, GetCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
+import { randomUUID } from 'node:crypto'
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb'
 import { forbidden } from '../domain/errors.js'
 import type { Establishment, Membership, MembershipRole, NotificationRecord, QueueStatus } from '../domain/types.js'
@@ -155,7 +156,8 @@ export class DirectoryStore {
             'SET #kind = :kind, #entryId = :entryId, #type = :type, #cycle = :cycle, #status = :pending,',
             '#channel = :channel, #destination = :destination, #claimedAt = :now,',
             '#createdAt = if_not_exists(#createdAt, :createdAt),',
-            '#sentAt = if_not_exists(#sentAt, :null), #failureReason = if_not_exists(#failureReason, :null)',
+            '#sentAt = if_not_exists(#sentAt, :null), #failureReason = if_not_exists(#failureReason, :null),',
+            '#subject = :subject',
             'ADD #attempts :one',
           ].join(' '),
           ConditionExpression: [
@@ -175,6 +177,7 @@ export class DirectoryStore {
             '#sentAt': 'sentAt',
             '#failureReason': 'failureReason',
             '#attempts': 'attempts',
+            '#subject': 'subject',
           },
           ExpressionAttributeValues: {
             ':kind': 'NOTIFICATION',
@@ -187,6 +190,7 @@ export class DirectoryStore {
             ':destination': record.destination,
             ':now': now.toISOString(),
             ':createdAt': record.createdAt,
+            ':subject': record.subject ?? record.type,
             ':null': null,
             ':one': 1,
             ':staleBefore': new Date(now.getTime() - leaseSeconds * 1000).toISOString(),
@@ -223,6 +227,49 @@ export class DirectoryStore {
             : { ':status': 'FAILED', ':reason': outcome.reason },
       }),
     )
+  }
+
+  /** Emite un ticket de WebSocket para un miembro y una cola. Vence en `ttlSeconds`. */
+  async issueWsTicket(grant: { userId: string; queueId: string }, now = new Date(), ttlSeconds = 60): Promise<{ ticket: string; expiresAt: string }> {
+    const ticket = randomUUID()
+    const expiresAt = new Date(now.getTime() + ttlSeconds * 1000).toISOString()
+    await this.table.documents.send(
+      new PutCommand({
+        TableName: this.table.tableName,
+        Item: {
+          PK: keys.wsTicketPk(ticket),
+          SK: keys.WS_TICKET_SK,
+          kind: 'WS_TICKET',
+          ...grant,
+          expiresAt,
+          // El TTL de DynamoDB puede tardar en borrar: la vigencia la decide `expiresAt`.
+          ttl: keys.epochSeconds(now) + ttlSeconds,
+        },
+      }),
+    )
+    return { ticket, expiresAt }
+  }
+
+  /**
+   * Usa un ticket de WebSocket: lo borra y devuelve a quién y a qué cola autoriza. Un borrado
+   * condicional hace que sirva una sola vez, aunque dos conexiones lo presenten a la vez.
+   */
+  async consumeWsTicket(ticket: string, now = new Date()): Promise<{ userId: string; queueId: string } | null> {
+    try {
+      const { Attributes } = await this.table.documents.send(
+        new DeleteCommand({
+          TableName: this.table.tableName,
+          Key: { PK: keys.wsTicketPk(ticket), SK: keys.WS_TICKET_SK },
+          ConditionExpression: 'attribute_exists(PK) AND expiresAt > :now',
+          ExpressionAttributeValues: { ':now': now.toISOString() },
+          ReturnValues: 'ALL_OLD',
+        }),
+      )
+      return Attributes ? { userId: String(Attributes['userId']), queueId: String(Attributes['queueId']) } : null
+    } catch (error) {
+      if (error instanceof ConditionalCheckFailedException) return null
+      throw error
+    }
   }
 
   async notificationsOf(entryId: string): Promise<NotificationRecord[]> {

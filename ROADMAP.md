@@ -283,7 +283,7 @@ JSON Schema, entre otras) están en [AVANCE-ENTREGA-3.md](AVANCE-ENTREGA-3.md).
 - [x] SNS FIFO `q-queue-events` (`MessageGroupId = queueId`, deduplicación por `eventId`).
 - [x] Las tres colas con el módulo `queue-with-dlq`: `q-push` (FIFO), `q-notifications` (standard,
       con filtro por `type`) y `q-lifecycle` (standard).
-- [ ] `MaximumConcurrency` en cada consumidor, según el presupuesto de §9. **Pasa a la Fase 5**: es
+- [x] `MaximumConcurrency` en cada consumidor, según el presupuesto de §9. **Hecho en la Fase 5**: es
       una propiedad del mapeo de cada consumidor, y los consumidores se crean ahí.
 - [x] `maxReceiveCount` en todas las colas y `MaximumRetryAttempts` en el stream: sin tope, un
       mensaje que siempre falla se reintenta para siempre y se cobra cada invocación.
@@ -298,21 +298,24 @@ publicador; las colas reales se comprueban en el lab** (comandos en [AVANCE-ENTR
 
 ## Fase 5 · Consumidores y tiempo real
 
-- [ ] API WebSocket con `$connect`, `subscribe`, `$disconnect` y `ping` con integración *mock*.
-- [ ] `λ ws-connections` en Node, con el ticket de un solo uso para el staff (§3.2). El ticket lo
+- [x] API WebSocket con `$connect`, `$disconnect` y `ping` con integración *mock*. **Sin `subscribe`**:
+      la cola queda fijada al conectar (ver el avance).
+- [x] `λ ws-connections` en Node, con el ticket de un solo uso para el staff (§3.2). El ticket lo
       emite `λ staff` a un usuario autenticado por Cognito.
-- [ ] `λ broadcaster`: lee la cola una vez por lote, arma las vistas y las empuja; borra la
+- [x] `λ broadcaster`: lee la cola una vez por lote, arma las vistas y las empuja; borra la
       conexión ante `410 Gone`.
-- [ ] `λ notifier`: deduplica con `NOTIF#type#cycle` y envía por SES en el idioma del cliente. Un
+- [x] `λ notifier`: deduplica con `NOTIF#type#cycle` y envía por SES en el idioma del cliente. Un
       rechazo por destinatario no verificado se registra como envío simulado y no se reintenta.
-- [ ] SES: la identidad del remitente en Terraform, y los emails del grupo verificados para probar.
-- [ ] `λ lifecycle`: vencimiento de gracia (`expireDue` sobre `QueueStore.mutate`) y cierre de
+- [x] SES: la identidad del remitente en Terraform, y los emails del grupo verificados para probar.
+- [x] `λ lifecycle`: vencimiento de gracia (`expireDue` sobre `QueueStore.mutate`) y cierre de
       colas en lotes de `RELEASE_BATCH_SIZE` (24), con `releaseBatch` hasta que devuelva 0.
-- [ ] Frontend: `useLiveResource` pasa de SSE a WebSocket y conserva la carga inicial por REST y el
+- [x] Frontend: `useLiveResource` pasa de SSE a WebSocket y conserva la carga inicial por REST y el
       polling de respaldo.
 
 **Listo cuando:** el tablero del staff y la página del cliente se actualizan solos, la gracia vence
-sin que nadie mire la cola, y llegan los emails a direcciones verificadas.
+sin que nadie mire la cola, y llegan los emails a direcciones verificadas. **Código completo y
+verificado localmente; la prueba de humo del pipeline recorre la cadena completa del tiempo real en
+AWS.**
 
 ---
 

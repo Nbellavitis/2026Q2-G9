@@ -71,3 +71,26 @@ export function barrier(parties: number): () => Promise<void> {
     return open
   }
 }
+
+/** La tabla de conexiones con la misma forma que `connections_table` en tables.tf: PK y GSI byQueue. */
+export async function createConnectionsTable(): Promise<TableConfig> {
+  const endpoint = inject('dynamodbEndpoint')
+  const tableName = `q-connections-test-${randomUUID().slice(0, 8)}`
+  const client = new DynamoDBClient({ endpoint, region: 'us-east-1', credentials: { accessKeyId: 'local', secretAccessKey: 'local' } })
+  await client.send(
+    new CreateTableCommand({
+      TableName: tableName,
+      BillingMode: 'PAY_PER_REQUEST',
+      AttributeDefinitions: [
+        { AttributeName: 'PK', AttributeType: 'S' },
+        { AttributeName: 'queueId', AttributeType: 'S' },
+      ],
+      KeySchema: [{ AttributeName: 'PK', KeyType: 'HASH' }],
+      GlobalSecondaryIndexes: [
+        { IndexName: 'byQueue', KeySchema: [{ AttributeName: 'queueId', KeyType: 'HASH' }], Projection: { ProjectionType: 'ALL' } },
+      ],
+    }),
+  )
+  client.destroy()
+  return createTableConfig({ tableName, endpoint })
+}

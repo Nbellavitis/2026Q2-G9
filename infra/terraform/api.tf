@@ -22,7 +22,7 @@ resource "aws_lambda_permission" "api" {
 
   statement_id  = "PermitirApiGateway"
   action        = "lambda:InvokeFunction"
-  function_name = module.functions[each.key].name
+  function_name = module.api_functions[each.key].name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_api_gateway_rest_api.this.execution_arn}/*"
 }

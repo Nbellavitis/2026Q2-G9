@@ -66,7 +66,7 @@ resource "aws_cloudwatch_metric_alarm" "stream_failures" {
 
 resource "aws_lambda_event_source_mapping" "stream" {
   event_source_arn = module.main_table.dynamodb_table_stream_arn
-  function_name    = module.functions["stream-publisher"].arn
+  function_name    = module.workers["stream-publisher"].arn
 
   starting_position                  = "LATEST"
   batch_size                         = 100

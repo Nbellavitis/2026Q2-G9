@@ -24,6 +24,11 @@ output "demo_staff_password" {
   sensitive   = true
 }
 
+output "websocket_url" {
+  description = "API WebSocket del tiempo real."
+  value       = aws_apigatewayv2_stage.ws.invoke_url
+}
+
 output "user_pool_id" {
   description = "User pool de Cognito del staff."
   value       = aws_cognito_user_pool.this.id
@@ -51,5 +56,9 @@ output "connections_table_name" {
 
 output "function_names" {
   description = "Funciones Lambda desplegadas."
-  value       = merge({ for key, function in module.functions : key => function.name }, { pre_signup = module.pre_signup.name })
+  value = merge(
+    { for key, function in module.api_functions : key => function.name },
+    { for key, function in module.workers : key => function.name },
+    { pre_signup = module.pre_signup.name },
+  )
 }

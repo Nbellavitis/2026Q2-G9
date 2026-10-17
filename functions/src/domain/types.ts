@@ -159,4 +159,6 @@ export interface NotificationRecord {
   createdAt: string
   sentAt: string | null
   failureReason: string | null
+  /** El asunto en el idioma del cliente: lo muestra el historial de avisos. */
+  subject?: string
 }

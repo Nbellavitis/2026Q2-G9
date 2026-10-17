@@ -16,7 +16,7 @@ resource "aws_s3_object" "site" {
 }
 
 # Lo que el sitio necesita saber de esta infraestructura y recién se conoce después del apply: los
-# ids de Cognito. Se lee al cargar la página, así el build del frontend no depende del despliegue.
+# ids de Cognito y la dirección del WebSocket. Se lee al cargar la página, así el build del frontend no depende del despliegue.
 resource "aws_s3_object" "site_config" {
   bucket = module.private_buckets["spa"].name
   key    = "config.json"
@@ -24,6 +24,7 @@ resource "aws_s3_object" "site_config" {
     region           = local.region
     userPoolId       = aws_cognito_user_pool.this.id
     userPoolClientId = aws_cognito_user_pool_client.web.id
+    websocketUrl     = aws_apigatewayv2_stage.ws.invoke_url
   })
   content_type  = "application/json"
   cache_control = "no-cache"

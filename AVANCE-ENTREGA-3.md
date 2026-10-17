@@ -9,7 +9,7 @@ fase anota qué se construyó, qué se decidió en el camino y por qué, qué se
 | 2 · Dominio y persistencia en DynamoDB | **Completa y verificada localmente** (94 tests, DynamoDB Local). La tabla `q-connections` falta crearla en el lab |
 | 3 · API síncrona y Cognito | **Código completo y verificado localmente** (104 tests, bundles probados contra DynamoDB Local). Falta correrlo en el lab |
 | 4 · Bus de eventos | **Código completo y verificado localmente** (109 tests, el stream real de DynamoDB Local). Falta correrlo en el lab |
-| 5 · Consumidores y tiempo real | Pendiente |
+| 5 · Consumidores y tiempo real | **Código completo y verificado localmente** (116 tests, los 9 bundles cargan). Falta correrlo en el lab |
 | 6 · Retirar lo anterior | Pendiente |
 | 7 · Entrega | Pendiente |
 
@@ -518,4 +518,97 @@ alarma: recibir el mismo mensaje de `q-notifications` seis veces sin borrarlo
 | `for_each` | Las colas y sus suscripciones a SNS, filtradas con una expresión `for … if` |
 | `count` | Dentro del módulo: la política de la cola solo si hay publicadores, la alarma de atraso solo si se pide; la suscripción por email a las alertas |
 | Funciones | `jsonencode` en la política de redrive, los filtros y el patrón del mapeo |
+
+---
+
+## Fase 5 · Consumidores y tiempo real
+
+### Qué se construyó
+
+```
+functions/src/
+  handlers/ws-connections.ts   $connect y $disconnect: ticket del cliente o ticket de un solo uso del staff
+  handlers/broadcaster.ts      consume q-push: tablero para el staff, ticket para cada cliente
+  handlers/notifier.ts         consume q-notifications: avisos por SES, una vez cada uno, en el idioma del cliente
+  handlers/lifecycle.ts        consume q-lifecycle: gracia vencida (o reprogramada) y cierre en lotes
+  notifications/templates.ts   los textos de i18n/notifications*.properties, en inglés y español
+  persistence/connections-store.ts   las conexiones en q-connections, por el índice byQueue
+  consumers/sqs.ts             respuesta parcial por mensaje, común a los tres consumidores
+  handlers/staff.ts            + POST /queues/{queueId}/ws-tickets
+infra/terraform/
+  realtime.tf                  API WebSocket: rutas, integración mock del ping, deployment y stage
+  notifications.tf             SES: el remitente y las direcciones del grupo para el sandbox
+  functions.tf                 funciones en dos grupos y un mapeo por consumidor con su techo de concurrencia
+frontend/src/lib/useLiveResource.ts   WebSocket con reconexión, ping y recarga por REST al reconectar
+.github/scripts/smoke-realtime.mjs    la cadena completa del tiempo real, en la prueba de humo
+```
+
+### Decisiones que se apartan del roadmap
+
+1. **Sin ruta `subscribe`.** La cola de una conexión ya se sabe al abrirla: la del ticket del cliente
+   o la que fija el ticket de un solo uso del staff, que se emite para una cola concreta
+   (`POST /queues/{queueId}/ws-tickets`). Cada conexión cuesta una invocación al abrir y otra al
+   cerrar, en lugar de tres. Con la concurrencia del lab, importa.
+2. **Las funciones se dividen en dos `for_each`**: las que atiende la API REST y los *workers*.
+   El broadcaster y el notifier necesitan la URL del sitio, y la API REST depende de sus propias
+   funciones: en un solo mapa, todo dependería de todo. Las URLs se arman con el id de cada API y no
+   con su stage, que depende del deployment y este de las funciones. Se comprobó con
+   `terraform graph -type=plan` que no queda ningún ciclo.
+3. **Los timeouts de los consumidores viven en un mapa propio (`local.consumers`)**, del que salen
+   tanto la función como la visibilidad de su cola (seis veces el timeout). Si la visibilidad se
+   leyera del mapa de funciones, que depende de las colas, habría otro ciclo.
+4. **Un tablero que no entra en un mensaje de WebSocket (128 KB) se reemplaza por `queue.changed`**,
+   y el navegador lo pide por REST. Pasa con colas de cientos de personas.
+5. **Un push que falla no se reintenta**, salvo que falle la lectura de la cola: el cliente detecta
+   el corte, reconecta y relee por REST. Una conexión que ya no existe (`410 Gone`) se borra.
+6. **Un rechazo del sandbox de SES por un destinatario no verificado se registra como envío
+   simulado y se marca enviado**, para que no se reintente; lo mismo si no hay remitente
+   configurado. Cualquier otro error de SES deja el aviso `FAILED` y el mensaje vuelve a la cola.
+7. **La gracia de más de 15 minutos se programa por tramos**, y un mensaje que llega un instante
+   antes de tiempo se reprograma por lo que falta.
+
+### Problemas encontrados y resueltos
+
+| Problema | Cómo se notó | Arreglo |
+|---|---|---|
+| `coalesce(var.ses_sender_email, "")` falla con el valor por defecto: `coalesce` no acepta strings vacíos | tflint, al evaluar los locals | Una condicional |
+| Un ciclo de dependencias entre la API REST, sus funciones y las que necesitan su URL | Análisis previo, confirmado con `terraform graph` | Dos grupos de funciones (decisión 2) |
+
+### Verificado localmente
+
+| Qué | Resultado |
+|---|---|
+| 116 tests | En verde. Los 7 nuevos, más la ruta del ticket en un test existente: el cliente y el staff conectan, un ticket inválido o vencido se rechaza, el de un solo uso no sirve dos veces, `$disconnect` borra; el broadcaster le da al staff el tablero y a cada cliente solo su ticket, y borra las conexiones que ya no existen; un tablero enorme se reemplaza por `queue.changed`; el notifier manda cada aviso una vez y en el idioma del cliente, aunque el mismo evento llegue dos veces; SES simula ante el sandbox y falla ante otro error; lifecycle reprograma la gracia si llega antes y la vence después; cerrar una cola de 30 personas la vacía en dos lotes; y solo un miembro obtiene el ticket del WebSocket |
+| Los 9 bundles | Todos cargan |
+| Frontend, Terraform (`fmt`, `validate`, `tflint`, `graph`), `actionlint` | Sin errores |
+
+### Sin verificar: necesita el lab
+
+| Riesgo | Cómo se nota | Plan B |
+|---|---|---|
+| La integración mock del `ping` no se acepta así | El `apply` de la integración falla | Rutear `ping` a `ws-connections` y responder 200 sin hacer nada |
+| `LabRole` no puede escribir en las conexiones (`execute-api:ManageConnections`) | El broadcaster loguea errores de permisos y las pantallas viven del polling | Sin plan B de infraestructura: el polling ya mantiene todo funcionando |
+| SES no está habilitado | El `apply` de las identidades falla | Dejar `ses_sender_email` en null: los avisos quedan simulados en los logs |
+
+### Cómo probarlo
+
+- **La prueba de humo del pipeline ya recorre la cadena completa del tiempo real en AWS:** abre un
+  WebSocket con el ticket de un cliente de prueba, deja la cola por REST y espera que el aviso
+  llegue por el push en menos de 45 segundos.
+- **Emails reales:** `ses_sender_email` y `ses_verified_recipients` con direcciones del grupo. Cada
+  dirección recibe un email de AWS para verificarla; después, quien se una con una de esas
+  direcciones recibe los avisos de verdad. Sin eso, aparecen en los logs de `q-notifier`.
+- **La gracia sin nadie mirando:** llamar a alguien desde el panel, cerrar el navegador y, pasada la
+  gracia, ver que la entrada volvió a la fila (o salió, según la política) sin que nadie la toque.
+
+### Rúbrica: lo que suma esta fase
+
+| Criterio | Dónde |
+|---|---|
+| Módulos propios | `lambda-function` en dos `for_each` (API y workers) más el trigger de Cognito: 9 funciones |
+| `for_each` | Los mapeos de cada consumidor, las rutas `$connect` y `$disconnect`, las direcciones verificadas de SES |
+| `count` | El remitente de SES, solo si se configura |
+| `depends_on` | El deployment de la API WebSocket espera a sus rutas: falla si la API no tiene ninguna, y no las referencia |
+| `lifecycle` | `create_before_destroy` en el deployment de la API WebSocket |
+| Funciones | `alltrue` en la validación de las direcciones, `toset`, `lower`, `format` en las URLs armadas con el id de cada API |
 

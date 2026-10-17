@@ -45,6 +45,10 @@ export const memberSk = (userId: string) => `MEMBER#${userId}`
 export const userPk = (userId: string) => `USER#${userId}`
 export const membershipSk = (establishmentId: string) => `EST#${establishmentId}`
 
+/** Un ticket de un solo uso para que el staff abra el WebSocket sin poner su token en la URL. */
+export const wsTicketPk = (id: string) => `WSTICKET#${id}`
+export const WS_TICKET_SK = 'WSTICKET'
+
 export const ratePk = (ip: string, minute: string) => `RATE#${ip}#${minute}`
 export const RATE_SK = 'RATE'
 

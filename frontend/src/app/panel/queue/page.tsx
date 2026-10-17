@@ -66,8 +66,11 @@ export default function QueueBoardPage() {
     [queueId],
   )
 
+  const socket = useCallback(() => (queueId ? api.realtime.queue(queueId) : Promise.resolve(null)), [queueId])
+
   const { data: board, error, live, loading, refresh } = useLiveResource<QueueSnapshot>({
     url: queueId && token ? api.streams.queue(queueId, token) : null,
+    socket,
     eventName: 'queue.updated',
     load,
     enabled: Boolean(queueId),

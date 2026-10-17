@@ -286,6 +286,13 @@ export function staffRoutes(deps: StaffDependencies): Routes {
       return ok(entryResponse(request, state, entry.id))
     },
 
+    // El WebSocket del tablero: un ticket de un solo uso, así el token de Cognito no va en la URL.
+    'POST /api/v1/queues/{queueId}/ws-tickets': async (request) => {
+      const queueId = request.param('queueId')
+      await authorizeQueue(request, queueId)
+      return created(await directory.issueWsTicket({ userId: request.caller().sub, queueId }, request.now))
+    },
+
     'GET /api/v1/queues/{queueId}/events': async (request) => {
       const queueId = request.param('queueId')
       await authorizeQueue(request, queueId)

@@ -195,6 +195,13 @@ describe('API de punta a punta', () => {
     const configure = await asStaff({ method: 'PATCH', resource: '/api/v1/queues/{queueId}', params: { queueId }, body: { name: 'Otra' } }, STAFF)
     expect(configure.json.code).toBe('OWNER_ONLY')
 
+    // El ticket del WebSocket del tablero: solo para miembros, de un solo uso y con vencimiento.
+    const wsTicket = await asStaff({ method: 'POST', resource: '/api/v1/queues/{queueId}/ws-tickets', params: { queueId }, body: {} }, STAFF)
+    expect(wsTicket.statusCode).toBe(201)
+    expect(wsTicket.json).toEqual({ ticket: expect.any(String), expiresAt: expect.any(String) })
+    const strangerTicket = await asStaff({ method: 'POST', resource: '/api/v1/queues/{queueId}/ws-tickets', params: { queueId }, body: {} }, STRANGER)
+    expect(strangerTicket.statusCode).toBe(403)
+
     const members = await asStaff({ method: 'GET', resource: '/api/v1/establishments/{establishmentId}/members', params: { establishmentId } })
     expect(members.json.map((member: { email: string }) => member.email).sort()).toEqual([OWNER.email, STAFF.email].sort())
   })

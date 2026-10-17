@@ -32,7 +32,7 @@ resource "aws_cognito_user" "demo" {
 resource "aws_lambda_invocation" "seed" {
   count = var.cargar_demo ? 1 : 0
 
-  function_name = module.functions["seed"].name
+  function_name = module.workers["seed"].name
   input = jsonencode(merge(local.demo, {
     owner = {
       sub         = aws_cognito_user.demo[0].sub

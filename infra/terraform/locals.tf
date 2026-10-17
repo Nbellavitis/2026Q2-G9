@@ -44,9 +44,15 @@ locals {
   # Funciones
   # ---------------------------------------------------------------------------------------------
 
-  # Una entrada por función. El for_each de functions.tf recorre este mapa, así que sumar una
-  # función es sumar una entrada acá y su handler en functions/src/handlers/.
-  functions = {
+  # Dos grupos de funciones, cada uno con su for_each en functions.tf. La separación evita un ciclo:
+  # la API REST depende de las funciones que atiende, y algunos workers necesitan la URL de la API
+  # (para los links de los avisos y las vistas). En un solo mapa, todo dependería de todo.
+  #
+  # Sumar una función es sumar una entrada al grupo que corresponde y su handler en
+  # functions/src/handlers/.
+
+  # Las que atiende API Gateway REST (openapi.tf).
+  api_functions = {
     # Los clientes, sin sesión: ver la cola, unirse, su ticket, el QR y la prueba de salud.
     public = {
       description = "API pública: clientes anónimos, autorizados por su ticket."
@@ -68,6 +74,19 @@ locals {
         USER_POOL_ID = aws_cognito_user_pool.this.id
       }
     }
+  }
+
+  # Los consumidores de cada cola de trabajo. Solo valores fijos: el timeout de cada uno define
+  # también la visibilidad de su cola (seis veces el timeout, como recomienda AWS), y si este mapa
+  # dependiera de las colas habría otro ciclo.
+  consumers = {
+    broadcaster = { queue = "push", timeout = 30, batch_size = 10 }
+    notifier    = { queue = "notifications", timeout = 30, batch_size = 10 }
+    lifecycle   = { queue = "lifecycle", timeout = 60, batch_size = 5 }
+  }
+
+  # Las que reaccionan a eventos: el stream, el WebSocket, las colas y la carga de demo.
+  workers = {
     # Lee el stream de q-main y publica cada evento en el bus (events.tf).
     stream-publisher = {
       description = "Publica los eventos de dominio de q-main en SNS y programa la gracia en SQS."
@@ -75,6 +94,49 @@ locals {
       timeout     = 30
       environment = {
         TOPIC_ARN           = aws_sns_topic.queue_events.arn
+        LIFECYCLE_QUEUE_URL = module.queues["lifecycle"].url
+      }
+    }
+    # $connect y $disconnect de la API WebSocket (realtime.tf).
+    ws-connections = {
+      description = "Abre y cierra las conexiones WebSocket, con el ticket del cliente o el de un solo uso del staff."
+      memory_size = 256
+      timeout     = 5
+      environment = {
+        TABLE_NAME        = module.main_table.dynamodb_table_id
+        CONNECTIONS_TABLE = module.connections_table.dynamodb_table_id
+      }
+    }
+    # Consume q-push y empuja las vistas por el WebSocket.
+    broadcaster = {
+      description = "Empuja a cada navegador la vista actual de la cola que mira."
+      memory_size = 512
+      timeout     = local.consumers.broadcaster.timeout
+      environment = {
+        TABLE_NAME        = module.main_table.dynamodb_table_id
+        CONNECTIONS_TABLE = module.connections_table.dynamodb_table_id
+        WS_ENDPOINT       = local.websocket_management_url
+        SITE_URL          = local.site_url
+      }
+    }
+    # Consume q-notifications y manda los avisos por SES.
+    notifier = {
+      description = "Decide qué avisos corresponden y los manda por email, una sola vez cada uno."
+      memory_size = 256
+      timeout     = local.consumers.notifier.timeout
+      environment = {
+        TABLE_NAME   = module.main_table.dynamodb_table_id
+        SENDER_EMAIL = var.ses_sender_email == null ? "" : var.ses_sender_email
+        SITE_URL     = local.site_url
+      }
+    }
+    # Consume q-lifecycle: gracias vencidas y cierres de cola.
+    lifecycle = {
+      description = "Aplica la gracia vencida y libera las colas cerradas en lotes."
+      memory_size = 256
+      timeout     = local.consumers.lifecycle.timeout
+      environment = {
+        TABLE_NAME          = module.main_table.dynamodb_table_id
         LIFECYCLE_QUEUE_URL = module.queues["lifecycle"].url
       }
     }
@@ -89,26 +151,32 @@ locals {
     }
   }
 
+  # Las URLs se arman con los ids de las APIs y no con sus stages: el stage depende del deployment,
+  # el deployment de las integraciones y las integraciones de las funciones. Con el id no hay ciclo.
+  site_url                 = format("https://%s.execute-api.%s.amazonaws.com/%s", aws_api_gateway_rest_api.this.id, local.region, var.api_stage_name)
+  websocket_management_url = format("https://%s.execute-api.%s.amazonaws.com/%s", aws_apigatewayv2_api.ws.id, local.region, var.api_stage_name)
+
   # ---------------------------------------------------------------------------------------------
   # Bus de eventos
   # ---------------------------------------------------------------------------------------------
 
-  # Las colas de trabajo, una por consumidor (Fase 5). `consumer_timeout` es el timeout de la Lambda
+  # Las colas de trabajo, una por consumidor. `consumer_timeout` es el timeout de la Lambda
   # que la consume: la visibilidad de la cola es seis veces eso, como recomienda AWS, para que un
   # mensaje no reaparezca mientras todavía se está procesando.
   queues = {
     # El push en vivo. FIFO: los eventos de una misma cola llegan en orden, de a un lote por cola.
     push = {
-      fifo                    = true
-      consumer_timeout        = 30
-      from_topic              = true
-      event_types             = null
-      max_message_age_seconds = null
+      fifo             = true
+      consumer_timeout = local.consumers.broadcaster.timeout
+      from_topic       = true
+      event_types      = null
+      # El push en vivo tiene que ser casi inmediato: más de 10 s de atraso es un consumidor caído.
+      max_message_age_seconds = 10
     }
     # Los avisos a clientes. Solo los eventos que pueden mover a alguien de lugar o cambiar su espera.
     notifications = {
       fifo                    = false
-      consumer_timeout        = 30
+      consumer_timeout        = local.consumers.notifier.timeout
       from_topic              = true
       event_types             = local.notification_event_types
       max_message_age_seconds = null
@@ -117,7 +185,7 @@ locals {
     # Le escribe stream-publisher directamente, porque SNS no permite una demora por mensaje.
     lifecycle = {
       fifo                    = false
-      consumer_timeout        = 60
+      consumer_timeout        = local.consumers.lifecycle.timeout
       from_topic              = false
       event_types             = null
       max_message_age_seconds = null

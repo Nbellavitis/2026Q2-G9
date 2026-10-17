@@ -39,8 +39,11 @@ export default function TicketPage() {
     [token],
   )
 
+  const socket = useCallback(() => (token ? api.realtime.ticket(token) : Promise.resolve(null)), [token])
+
   const { data: ticket, error, live, loading, refresh } = useLiveResource<TicketView>({
     url: token ? api.streams.ticket(token) : null,
+    socket,
     eventName: 'ticket.updated',
     load,
     enabled: Boolean(token),
