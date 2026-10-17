@@ -290,7 +290,7 @@ export default function QueueBoardPage() {
                   />
                 ))}
                 {lane.waiting.length > 0 ? (
-                  <ol className="space-y-2">
+                  <ol className="@container space-y-2">
                     {lane.waiting.map((entry) => (
                       <WaitingRow
                         key={entry.id}
@@ -340,7 +340,7 @@ export default function QueueBoardPage() {
           {board.waiting.length === 0 ? (
             <EmptyState title={t('board.lineEmptyTitle')} description={t('board.lineEmptyBody')} />
           ) : (
-            <ol className="space-y-2">
+            <ol className="@container space-y-2">
               {board.waiting.map((entry) => (
                 <WaitingRow
                   key={entry.id}
@@ -607,7 +607,7 @@ function WaitingRow({
         </p>
       </div>
 
-      <span className="hidden shrink-0 text-sm text-muted tnum sm:block">
+      <span className="hidden shrink-0 text-sm text-muted tnum @lg:block">
         {formatWaitNeutral(t, entry.estimatedWaitMinutes)}
       </span>
 
