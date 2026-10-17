@@ -7,7 +7,7 @@
 import { conflict, notFound, validation } from './errors.js'
 import { recordServiceTime } from './estimation.js'
 import { allocateEndKey, applyNoShow, expireDue } from './grace.js'
-import { ensureLaneCapacity, selectLane } from './lanes.js'
+import { accepts, ensureLaneCapacity, selectLane } from './lanes.js'
 import { rotation, select } from './selector.js'
 import type { Actor, Session } from './state.js'
 import { CUSTOMER } from './state.js'
@@ -233,8 +233,20 @@ export function requeue(session: Session, entryId: string, actor: Actor): Entry 
   if (entry.status === 'WAITING') throw conflict('ALREADY_WAITING', 'This entry is already waiting')
 
   const wasTerminal = isTerminal(entry.status)
-  // Traer de vuelta a alguien que ya no estaba suma una entrada activa: respeta el tope igual que un join.
-  if (wasTerminal) requireRoom(session)
+  // Traer de vuelta a alguien que ya no estaba es un ingreso nuevo, con los mismos controles y en el
+  // mismo orden que `join`. Su carril puede haberse apagado o retirado mientras estaba afuera: la
+  // regla que impide apagar un carril con gente solo cuenta a los activos, y quien ya había terminado
+  // no lo es. Sin esto volvía a esperar en un carril que el round robin no visita, o que el tablero no
+  // muestra. A alguien llamado o en atención no le aplica: su carril no se pudo apagar y él ya cuenta
+  // dentro de su capacidad.
+  const previousLaneId = entry.laneId
+  if (wasTerminal) {
+    const own = session.state.lanes.find((candidate) => candidate.id === entry.laneId)
+    const lane = own && accepts(own, entry.partySize) ? own : selectLane(session.state.lanes, entry.partySize)
+    ensureLaneCapacity(lane, session.state.entries, entry.partySize)
+    requireRoom(session)
+    entry.laneId = lane.id
+  }
   entry.status = 'WAITING'
   entry.calledAt = null
   entry.servingStartedAt = null
@@ -243,7 +255,11 @@ export function requeue(session: Session, entryId: string, actor: Actor): Entry 
   entry.notificationCycle += 1
   if (wasTerminal) entry.orderKey = allocateEndKey(session)
   session.touchEntry(entry)
-  session.record('ENTRY_REQUEUED', actor, entry, { placement: wasTerminal ? 'END' : 'KEEP_POSITION' })
+  session.record('ENTRY_REQUEUED', actor, entry, {
+    placement: wasTerminal ? 'END' : 'KEEP_POSITION',
+    // Solo si cambió: así el historial de esa persona cuenta por qué ahora espera en otro carril.
+    ...(entry.laneId === previousLaneId ? {} : { laneId: entry.laneId, previousLaneId }),
+  })
   return entry
 }
 

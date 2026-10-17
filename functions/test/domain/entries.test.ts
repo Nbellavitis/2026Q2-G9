@@ -280,6 +280,107 @@ describe('salir y volver', () => {
   })
 })
 
+// Traer de vuelta a alguien que ya había terminado es un ingreso nuevo: pasa por los mismos tres
+// controles que `join`, en el mismo orden. Su carril pudo haberse apagado o retirado mientras estaba
+// afuera (la regla que impide apagar un carril solo mira a los activos), y sin esto volvía a esperar
+// en un carril que el round robin no visita, o que el tablero ni siquiera muestra.
+describe('traer de vuelta a alguien que ya había terminado', () => {
+  const FINISHED = { status: 'LEFT' as const, finishedAt: NOW.toISOString() }
+  const small = (overrides = {}) => lane('small', { minPartySize: 1, maxPartySize: 4, ...overrides })
+
+  it('si su carril se apagó, va al que hoy acepte su tamaño, al final de la fila', () => {
+    const state = queueState()
+    state.lanes = [small(), lane('big', { minPartySize: 5, active: false }), lane('big2', { minPartySize: 5 })]
+    state.entries.push(
+      entry('a', 1, { laneId: 'small' }),
+      entry('gone', 2, { laneId: 'big', partySize: 6, ...FINISHED }),
+    )
+    const s = session(state)
+    const back = requeue(s, 'gone', STAFF)
+    expect(back.laneId).toBe('big2')
+    expect(ids(s.waiting())).toEqual(['a', 'gone'])
+    expect(s.events.at(-1)).toMatchObject({
+      type: 'ENTRY_REQUEUED',
+      detail: { placement: 'END', laneId: 'big2', previousLaneId: 'big' },
+    })
+  })
+
+  it('si su carril se retiró, también', () => {
+    const state = queueState()
+    state.lanes = [lane('big', { minPartySize: 5, active: false, deletedAt: NOW.toISOString() }), lane('big2', { minPartySize: 5 })]
+    state.entries.push(entry('gone', 1, { laneId: 'big', partySize: 6, ...FINISHED }))
+    expect(requeue(session(state), 'gone', STAFF).laneId).toBe('big2')
+  })
+
+  it('si su carril sigue abierto pero ya no acepta su tamaño, también se lo reubica', () => {
+    const state = queueState()
+    // Era "5+" y se editó a "6+": un grupo de 5 ya no le corresponde.
+    state.lanes = [lane('big', { minPartySize: 6 }), lane('five', { minPartySize: 5, maxPartySize: 5 })]
+    state.entries.push(entry('gone', 1, { laneId: 'big', partySize: 5, ...FINISHED }))
+    expect(requeue(session(state), 'gone', STAFF).laneId).toBe('five')
+  })
+
+  it('si su carril sigue abierto y tiene lugar, se queda en el suyo', () => {
+    const state = queueState()
+    state.lanes = [small(), lane('all', { minPartySize: 1 })]
+    state.entries.push(entry('gone', 1, { laneId: 'small', partySize: 2, ...FINISHED }))
+    const s = session(state)
+    expect(requeue(s, 'gone', STAFF).laneId).toBe('small')
+    expect(s.events.at(-1)?.detail).toEqual({ placement: 'END' })
+  })
+
+  it('si ningún carril acepta su tamaño, se rechaza y no cambia nada', () => {
+    const state = queueState()
+    state.lanes = [small(), lane('big', { minPartySize: 5, active: false })]
+    state.entries.push(entry('gone', 1, { laneId: 'big', partySize: 6, ...FINISHED }))
+    const s = session(state)
+    expect(codeOf(() => requeue(s, 'gone', STAFF))).toBe('NO_COMPATIBLE_LANE')
+    expect(s.findEntry('gone')).toMatchObject({ status: 'LEFT', laneId: 'big' })
+    expect(s.events).toEqual([])
+  })
+
+  it('respeta el tope de su propio carril aunque siga abierto', () => {
+    const state = queueState()
+    state.lanes = [small({ maxSize: 1 })]
+    state.entries.push(entry('a', 1, { laneId: 'small' }), entry('gone', 2, { laneId: 'small', ...FINISHED }))
+    expect(codeOf(() => requeue(session(state), 'gone', STAFF))).toBe('LANE_FULL')
+  })
+
+  it('respeta el tope del carril al que se lo mueve', () => {
+    const state = queueState()
+    state.lanes = [lane('big', { minPartySize: 5, active: false }), lane('big2', { minPartySize: 5, maxSize: 1 })]
+    state.entries.push(
+      entry('b', 1, { laneId: 'big2', partySize: 5 }),
+      entry('gone', 2, { laneId: 'big', partySize: 6, ...FINISHED }),
+    )
+    expect(codeOf(() => requeue(session(state), 'gone', STAFF))).toBe('LANE_FULL')
+  })
+
+  // El orden de los tres controles es el de `join`: carril, tope del carril, tope de la cola. Estos
+  // dos casos fallan dos controles a la vez y fijan cuál gana.
+  it('si falla el carril y la cola está llena, gana el carril', () => {
+    const state = queueState({ maxSize: 1 })
+    state.lanes = [small(), lane('big', { minPartySize: 5, active: false })]
+    state.entries.push(entry('a', 1, { laneId: 'small' }), entry('gone', 2, { laneId: 'big', partySize: 6, ...FINISHED }))
+    expect(codeOf(() => requeue(session(state), 'gone', STAFF))).toBe('NO_COMPATIBLE_LANE')
+  })
+
+  it('si el carril y la cola están llenos, gana el tope del carril', () => {
+    const state = queueState({ maxSize: 1 })
+    state.lanes = [small({ maxSize: 1 })]
+    state.entries.push(entry('a', 1, { laneId: 'small' }), entry('gone', 2, { laneId: 'small', ...FINISHED }))
+    expect(codeOf(() => requeue(session(state), 'gone', STAFF))).toBe('LANE_FULL')
+  })
+
+  it('a alguien llamado no le aplica nada de esto: ya cuenta en su carril', () => {
+    const state = queueState()
+    state.lanes = [small({ maxSize: 1 })]
+    state.entries.push(entry('a', 1, { laneId: 'small', status: 'CALLED' }))
+    const back = requeue(session(state), 'a', STAFF)
+    expect(back).toMatchObject({ status: 'WAITING', laneId: 'small' })
+  })
+})
+
 describe('cerrar una cola', () => {
   it('cerrar es inmediato y deja el evento para que lifecycle libere la fila', () => {
     const state = queueState()
