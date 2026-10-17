@@ -712,3 +712,40 @@ Para mirar, sin corregir:
 
 Verificado: 128 tests (5 corridas seguidas sin fallas), typecheck de functions y frontend, build del
 frontend, bundles de las funciones, `terraform fmt`/`validate`, tflint y actionlint.
+
+---
+
+## Primera corrida en el lab
+
+PR #1 (`entrega-3 → main`, borrador, no se mergea) en `josebl123/tp-cloud`, ejecución
+[39079525048](https://github.com/josebl123/tp-cloud/actions/runs/39079525048).
+
+**Validar y Compilar pasaron**: los 128 tests, incluida la suite de integración contra DynamoDB
+Local, corrieron en verde en un runner limpio de GitHub. **El plan pasó**: 203 recursos a crear,
+ninguno a cambiar ni destruir.
+
+**El apply falló** al crear el primer bucket:
+
+```
+Error: reading S3 Bucket (q-logs-<cuenta>-us-east-1) object lock configuration: ...
+AccessDenied: ... not authorized to perform: s3:GetBucketObjectLockConfiguration ...
+with an explicit deny in a service control policy: ...service_control_policy/p-tbyuw8u2
+```
+
+El provider, después de crear un bucket con `aws_s3_bucket`, lee su configuración de object lock, y
+el SCP del Learner Lab lo niega. **Ninguna versión del provider lo evita**: en v4.67, v5.100 y v6.67
+un `AccessDenied` en esa lectura es un error en la partición `aws` (solo toleran "no encontrado" y
+"no implementado"), y la lectura es incondicional. Mientras el SCP siga así, `aws_s3_bucket` no se
+puede usar en esta cuenta.
+
+| | |
+|---|---|
+| Creado antes de la falla | Las dos tablas de DynamoDB, las 7 colas SQS, los 2 tópicos SNS, **las 5 alarmas de CloudWatch**, la API WebSocket con su ruta e integración `ping`, un log group, la contraseña de demo. El bucket `q-logs` existe pero quedó *tainted* en el estado |
+| Respondido | **Las alarmas de CloudWatch están permitidas** (era uno de los riesgos anotados) |
+| Sin probar todavía | Que API Gateway pueda asumir `LabRole` para leer el sitio: el apply no llegó |
+| `destroy` | **También falla hoy**: refresca el estado antes de destruir, y refrescar el bucket hace la misma lectura negada. Salida: `terraform destroy -refresh=false`, que el workflow todavía no pasa. Lo desplegado cuesta casi nada mientras tanto |
+
+Pendiente de decidir cómo se crean los buckets. Antes de elegir, conviene saber qué otras lecturas
+de S3 niega el SCP, porque cualquier alternativa sigue usando `aws_s3_bucket_versioning`,
+`_logging`, `_policy`, `_public_access_block`, `_ownership_controls` y `_lifecycle_configuration`, y
+cada uno lee su propia API.
