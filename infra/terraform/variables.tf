@@ -123,3 +123,14 @@ variable "demo_email" {
     error_message = "El email de demo tiene que ser una dirección válida."
   }
 }
+
+variable "email_alertas" {
+  description = "Email que recibe las alarmas (mensajes en una DLQ, fallas del stream). null para no suscribir ninguno."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.email_alertas == null || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.email_alertas))
+    error_message = "email_alertas tiene que ser una dirección válida."
+  }
+}

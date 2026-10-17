@@ -8,7 +8,7 @@ fase anota qué se construyó, qué se decidió en el camino y por qué, qué se
 | 1 · Esqueleto que camina: Terraform y pipeline | **Código completo y verificado localmente. Falta correrlo en el lab.** |
 | 2 · Dominio y persistencia en DynamoDB | **Completa y verificada localmente** (94 tests, DynamoDB Local). La tabla `q-connections` falta crearla en el lab |
 | 3 · API síncrona y Cognito | **Código completo y verificado localmente** (104 tests, bundles probados contra DynamoDB Local). Falta correrlo en el lab |
-| 4 · Bus de eventos | Pendiente |
+| 4 · Bus de eventos | **Código completo y verificado localmente** (109 tests, el stream real de DynamoDB Local). Falta correrlo en el lab |
 | 5 · Consumidores y tiempo real | Pendiente |
 | 6 · Retirar lo anterior | Pendiente |
 | 7 · Entrega | Pendiente |
@@ -418,3 +418,104 @@ frontend/src/lib/
 | `lifecycle` | `create_before_destroy` en el deployment, que ahora se rehace con el hash del documento OpenAPI |
 | Funciones | `jsondecode`, `file`, `regexall`, `distinct`, `split`, `lower`, `replace`, `trimprefix`, `tostring`, `try`, además de las de la Fase 1 |
 | Locals | La tabla de rutas y el documento OpenAPI armado a partir de ella (`openapi.tf`), los datos de demo |
+
+---
+
+## Fase 4 · Bus de eventos
+
+### Qué se construyó
+
+```
+infra/terraform/
+  modules/queue-with-dlq/      tercer módulo propio: cola, DLQ, redrive, permiso de SNS y alarmas
+  events.tf                    SNS FIFO, las tres colas, suscripciones, cola de fallas del stream y su mapeo
+  monitoring.tf                SNS q-alerts y la suscripción por email opcional
+  locals.tf                    + las colas (una por consumidor) y los tipos que filtra q-notifications
+functions/src/handlers/stream-publisher.ts   reparte los eventos del stream
+functions/test/handlers/stream-publisher.test.ts   4 tests unitarios con SNS y SQS falsos
+functions/test/integration/stream.test.ts         el stream real de DynamoDB Local
+```
+
+```
+q-main ──Streams──▶ λ stream-publisher ──▶ SNS FIFO q-queue-events ──┬─▶ SQS FIFO q-push
+                           │                                         └─▶ SQS q-notifications (filtrada)
+                           └──────────────────────────────────────────▶ SQS q-lifecycle (con demora)
+```
+
+| Pieza | Configuración |
+|---|---|
+| Mapeo del stream | Lotes de 100, una ejecución por shard, respuesta parcial por registro, partir el lote ante error, 5 reintentos, edad máxima de 1 h y, al agotarse, la cola `q-stream-failures` con su alarma |
+| Filtro del mapeo | Solo `INSERT` de ítems con `kind = EVENT`: entradas, colas, avisos y límites por IP no invocan la función |
+| `q-queue-events` | FIFO, grupo = cola, deduplicación = id del evento |
+| `q-push` | FIFO, sin filtro. Visibilidad 180 s |
+| `q-notifications` | Standard, filtrada a los eventos que pueden mover a alguien o cambiar su espera. Visibilidad 180 s |
+| `q-lifecycle` | Standard, le escribe directo `stream-publisher`: `GRACE` con demora hasta el vencimiento (tope de 900 s) por cada llamado, `RELEASE` sin demora por cada cierre. Visibilidad 360 s |
+| Las tres | DLQ propia, 5 intentos, alarma con el primer mensaje en la DLQ |
+
+### Decisiones que se apartan del roadmap
+
+1. **El filtro del stream mira `kind = EVENT`, no el sufijo `#EV` de la clave.** Los filtros de los
+   mapeos de Lambda tienen comparación exacta y por prefijo, pero no por sufijo garantizado. Todo
+   ítem de evento ya lleva `kind = EVENT`. La función además vuelve a verificarlo, así un filtro mal
+   escrito no puede publicar otra cosa.
+2. **`MaximumConcurrency` pasa a la Fase 5.** Es una propiedad del mapeo de cada consumidor, y los
+   consumidores se crean ahí. El stream ya usa una sola ejecución por shard.
+3. **La alarma de atraso de `q-push` se enciende en la Fase 5.** Sin consumidor, sonaría con el
+   primer evento. El módulo ya la soporta con `max_message_age_seconds`.
+4. **La cola de fallas del stream no usa el módulo:** es el destino final de lo que no se pudo
+   publicar, y una DLQ de una DLQ no tiene sentido. Tiene su propia alarma.
+5. **Los eventos se ordenan por cola y versión antes de publicar.** DynamoDB garantiza el orden del
+   stream por ítem, no entre ítems distintos. Si un evento falla, se informa el primer registro
+   pendiente en el orden del stream; lo que se vuelva a publicar lo descarta la deduplicación de SNS.
+
+### Problemas encontrados y resueltos
+
+| Problema | Cómo se notó | Arreglo |
+|---|---|---|
+| `@aws-sdk/util-dynamodb` no se publica con la misma versión que los clientes | `npm install` falló con `ETARGET` | Fijada en la versión que ya usa `lib-dynamodb` (3.996.9) |
+| El cliente de Streams del SDK deserializa un mapa vacío como `{}`, que `unmarshall` rechaza | El test del stream real falló con `No value defined` | Solo afecta al test: Lambda entrega el JSON del servicio, con su `M`. El test lo restaura así |
+
+### Verificado localmente
+
+| Qué | Resultado |
+|---|---|
+| 109 tests | En verde. Unitarios: qué se publica y qué no, grupo y deduplicación, demora de la gracia con su tope, cierre sin demora, orden por cola y versión, y qué registro se informa cuando algo falla. Integración: unirse y llamar en DynamoDB Local, leer su stream como lo haría el mapeo, y ver salir `QUEUE_CREATED`, `ENTRY_JOINED` y `ENTRY_CALLED`, más un `GRACE` con 90 s de demora |
+| El bundle de `stream-publisher` | Carga, interpreta un registro y, con SNS caído, devuelve su número de secuencia para reintentar |
+| Terraform `fmt`, `validate`, `tflint`; `actionlint` | Sin errores |
+
+### Sin verificar: necesita el lab
+
+| Riesgo | Cómo se nota | Plan B |
+|---|---|---|
+| Un tópico SNS FIFO no puede entregar a una cola standard (`q-notifications`) | El `apply` de la suscripción falla | `q-notifications` también FIFO (`fifo = true` en `locals.tf`) |
+| `LabRole` no puede leer el stream o escribir en la cola de fallas | El mapeo queda en estado de error | Revisar el estado con `aws lambda get-event-source-mapping` |
+| El filtro del mapeo no coincide con la forma real del registro | La función nunca se invoca y las colas quedan vacías | Sacar el filtro: la función ya descarta lo que no es un evento |
+
+### Cómo comprobarlo en el lab
+
+Después de unirse a la cola de demo y llamar a alguien desde el panel, las tres colas tienen que
+tener mensajes (todavía no hay consumidores):
+
+```bash
+for q in q-push.fifo q-notifications q-lifecycle; do
+  url=$(aws sqs get-queue-url --queue-name "$q" --query QueueUrl --output text)
+  aws sqs get-queue-attributes --queue-url "$url" \
+    --attribute-names ApproximateNumberOfMessages ApproximateNumberOfMessagesDelayed \
+    --query "Attributes" --output text | sed "s|^|$q |"
+done
+```
+
+`q-lifecycle` muestra el vencimiento de la gracia como mensaje demorado. Para ver la DLQ y la
+alarma: recibir el mismo mensaje de `q-notifications` seis veces sin borrarlo
+(`aws sqs receive-message --queue-url … --visibility-timeout 0`), y a la sexta pasa a
+`q-notifications-dlq` y la alarma `q-notifications-dlq-con-mensajes` se dispara.
+
+### Rúbrica: lo que suma esta fase
+
+| Criterio | Dónde |
+|---|---|
+| Módulos propios | Tercer módulo: `queue-with-dlq`, usado tres veces con `for_each` (`events.tf`) |
+| `for_each` | Las colas y sus suscripciones a SNS, filtradas con una expresión `for … if` |
+| `count` | Dentro del módulo: la política de la cola solo si hay publicadores, la alarma de atraso solo si se pide; la suscripción por email a las alertas |
+| Funciones | `jsonencode` en la política de redrive, los filtros y el patrón del mapeo |
+

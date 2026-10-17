@@ -68,6 +68,16 @@ locals {
         USER_POOL_ID = aws_cognito_user_pool.this.id
       }
     }
+    # Lee el stream de q-main y publica cada evento en el bus (events.tf).
+    stream-publisher = {
+      description = "Publica los eventos de dominio de q-main en SNS y programa la gracia en SQS."
+      memory_size = 256
+      timeout     = 30
+      environment = {
+        TOPIC_ARN           = aws_sns_topic.queue_events.arn
+        LIFECYCLE_QUEUE_URL = module.queues["lifecycle"].url
+      }
+    }
     # Carga los datos de demo. La invoca Terraform (seed.tf), no API Gateway.
     seed = {
       description = "Datos de demo: un local con dos colas y sus carriles."
@@ -78,6 +88,53 @@ locals {
       }
     }
   }
+
+  # ---------------------------------------------------------------------------------------------
+  # Bus de eventos
+  # ---------------------------------------------------------------------------------------------
+
+  # Las colas de trabajo, una por consumidor (Fase 5). `consumer_timeout` es el timeout de la Lambda
+  # que la consume: la visibilidad de la cola es seis veces eso, como recomienda AWS, para que un
+  # mensaje no reaparezca mientras todavía se está procesando.
+  queues = {
+    # El push en vivo. FIFO: los eventos de una misma cola llegan en orden, de a un lote por cola.
+    push = {
+      fifo                    = true
+      consumer_timeout        = 30
+      from_topic              = true
+      event_types             = null
+      max_message_age_seconds = null
+    }
+    # Los avisos a clientes. Solo los eventos que pueden mover a alguien de lugar o cambiar su espera.
+    notifications = {
+      fifo                    = false
+      consumer_timeout        = 30
+      from_topic              = true
+      event_types             = local.notification_event_types
+      max_message_age_seconds = null
+    }
+    # Lo que dispara el sistema y no una persona: la gracia vencida (con demora) y el cierre de colas.
+    # Le escribe stream-publisher directamente, porque SNS no permite una demora por mensaje.
+    lifecycle = {
+      fifo                    = false
+      consumer_timeout        = 60
+      from_topic              = false
+      event_types             = null
+      max_message_age_seconds = null
+    }
+  }
+
+  notification_event_types = [
+    "ENTRY_JOINED",
+    "ENTRY_CALLED",
+    "ENTRY_SERVING_STARTED",
+    "ENTRY_SERVED",
+    "ENTRY_LEFT",
+    "ENTRY_NO_SHOW",
+    "ENTRY_REQUEUED",
+    "QUEUE_UPDATED",
+    "LANE_CHANGED",
+  ]
 
   # ---------------------------------------------------------------------------------------------
   # Datos de demo

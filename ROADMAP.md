@@ -278,19 +278,21 @@ JSON Schema, entre otras) están en [AVANCE-ENTREGA-3.md](AVANCE-ENTREGA-3.md).
 
 ## Fase 4 · Bus de eventos
 
-- [ ] `λ stream-publisher`: filtra solo los `INSERT` de `QUEUE#*#EV`, con
+- [x] `λ stream-publisher`: filtra solo los `INSERT` de `QUEUE#*#EV`, con
       `BisectBatchOnFunctionError` y destino de fallas.
-- [ ] SNS FIFO `q-queue-events` (`MessageGroupId = queueId`, deduplicación por `eventId`).
-- [ ] Las tres colas con el módulo `queue-with-dlq`: `q-push` (FIFO), `q-notifications` (standard,
+- [x] SNS FIFO `q-queue-events` (`MessageGroupId = queueId`, deduplicación por `eventId`).
+- [x] Las tres colas con el módulo `queue-with-dlq`: `q-push` (FIFO), `q-notifications` (standard,
       con filtro por `type`) y `q-lifecycle` (standard).
-- [ ] `MaximumConcurrency` en cada consumidor, según el presupuesto de §9.
-- [ ] `maxReceiveCount` en todas las colas y `MaximumRetryAttempts` en el stream: sin tope, un
+- [ ] `MaximumConcurrency` en cada consumidor, según el presupuesto de §9. **Pasa a la Fase 5**: es
+      una propiedad del mapeo de cada consumidor, y los consumidores se crean ahí.
+- [x] `maxReceiveCount` en todas las colas y `MaximumRetryAttempts` en el stream: sin tope, un
       mensaje que siempre falla se reintenta para siempre y se cobra cada invocación.
-- [ ] Alarma de edad del mensaje más viejo de `q-push` mayor a 10 s. Todas las alarmas avisan a SNS
-      `q-alerts`.
+- [x] Todas las alarmas avisan a SNS `q-alerts`. La de edad del mensaje más viejo de `q-push`
+      **se enciende en la Fase 5**: sin consumidor, sonaría con el primer evento. El módulo ya la soporta.
 
 **Listo cuando:** una acción en la API deja su evento en las tres colas, y un mensaje que falla
-siempre termina en la DLQ y dispara la alarma.
+siempre termina en la DLQ y dispara la alarma. **Código completo y verificado localmente hasta el
+publicador; las colas reales se comprueban en el lab** (comandos en [AVANCE-ENTREGA-3.md](AVANCE-ENTREGA-3.md)).
 
 ---
 
