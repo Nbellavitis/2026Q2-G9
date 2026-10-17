@@ -93,7 +93,13 @@ export async function broadcast(queueId: string, deps: BroadcasterDependencies):
 export async function handleBatch(records: readonly SQSRecord[], deps: BroadcasterDependencies): Promise<SQSBatchResponse> {
   const byQueue = new Map<string, SQSRecord[]>()
   for (const record of records) {
-    const queueId = String((JSON.parse(record.body) as { queueId?: string }).queueId ?? '')
+    // Un mensaje que no se puede leer no tiene cola a la que difundir: se descarta, sin tirar el lote.
+    let queueId = ''
+    try {
+      queueId = String((JSON.parse(record.body) as { queueId?: string }).queueId ?? '')
+    } catch {
+      console.error('Mensaje ilegible, se descarta', record.messageId)
+    }
     byQueue.set(queueId, [...(byQueue.get(queueId) ?? []), record])
   }
 

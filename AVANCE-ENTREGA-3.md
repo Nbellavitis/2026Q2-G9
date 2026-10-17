@@ -612,3 +612,46 @@ frontend/src/lib/useLiveResource.ts   WebSocket con reconexión, ping y recarga 
 | `lifecycle` | `create_before_destroy` en el deployment de la API WebSocket |
 | Funciones | `alltrue` en la validación de las direcciones, `toset`, `lower`, `format` en las URLs armadas con el id de cada API |
 
+
+## Auditoría previa a la primera prueba en el lab
+
+Revisión de punta a punta antes de desplegar: Terraform contra las restricciones del Learner Lab,
+seguridad y consistencia de las Lambdas, frontend servido bajo `/prod` y pipeline. No apareció nada
+que bloquee el `apply`. Cada hallazgo se verificó antes de corregirlo.
+
+### Corregido
+
+| Hallazgo | Qué pasaba | Arreglo |
+|---|---|---|
+| Cola trabada por el límite de 100 ítems | Toda operación vencía a *todos* los llamados vencidos en una transacción (4 ítems cada uno). Con 25 o más, la cola daba 500 para siempre, también en lifecycle | `expireDue` vence a lo sumo 15 por sesión, los más viejos primero, y `read()` repite hasta 5 rondas. Test de regresión: sin el arreglo falla con `RangeError: 125 ítems` |
+| Alta de miembros usurpable | Si el mail ya tenía cuenta, el alta ignoraba la contraseña y agregaba a quien la había registrado (incluso como OWNER) | Con contraseña y cuenta existente responde 409 `EMAIL_TAKEN`. Si Cognito rechaza la contraseña, se borra la cuenta a medio crear (antes quedaba huérfana y el reintento la agregaba sin contraseña) |
+| Botón "volver a la fila" sin `/prod` | Era un `<a>` plano: llevaba a `/q/?id=…` sin stage y API Gateway respondía 403 | `ButtonLink` (Next aplica el basePath) |
+| Pipeline trabado por la aprobación | La concurrency estaba en el workflow: un apply esperando aprobación frenaba validate y plan del push siguiente, y un label cualquiera cancelaba el run pendiente | Concurrency solo en los jobs `apply` y `destroy`. Plan, apply y destroy esperan el lock de S3 con `-lock-timeout=10m` |
+| Avisos simulados como enviados | En el sandbox de SES, un aviso que no salió quedaba `SENT` por `EMAIL` | Queda `SENT` por `LOG` |
+| Broadcaster | Un mensaje ilegible tiraba el lote entero | Se descarta ese mensaje y el resto sigue |
+| SES | Remitente repetido en `ses_verified_recipients` con otras mayúsculas creaba dos identidades iguales | Se compara en minúsculas |
+| 404 del sitio | Una ruta inexistente devolvía el XML de error de S3 | El 4xx de S3 se pasa a texto (`CONVERT_TO_TEXT`) y una plantilla devuelve `404.html` del build con status 404, dentro de un bloque literal `#[[ ]]#` para que Velocity no toque `$` ni `#`. Probado con Velocity 1.7: sale idéntica. El smoke test lo comprueba en el lab |
+| Historial del panel | Faltaban `QUEUE_CLOSED` y `LANE_CHANGED`: se veía la clave cruda | Tipos y textos en los dos idiomas |
+
+### Pendiente, a decidir
+
+- **Concurrencia de Lambda en 10.** Los consumidores pueden tomar 6 y a la API le quedan 2-3. El
+  stage acepta 50 rps con ráfaga de 100: ante un pico Lambda limita y responde 5xx en vez de 429.
+  Opción: bajar `api_throttle_*` a 10/20 en el lab.
+- **Sesión del staff sin refresh.** El refresh token se descarta: la sesión muere a las 12 h.
+- **`destroy` necesita compilar.** Depende del build, así que un error de TypeScript impide
+  limpiar la cuenta.
+- **`partySize` sin límite común.** Availability acepta 80 y el join corta en 50; `requirePartySize`
+  se guarda pero no se aplica.
+- **Para mirar en el lab:**
+  - si los tres `method_settings` chocan al aplicarse en paralelo (se resuelve reaplicando);
+  - si un `plan` posterior al apply sale vacío;
+  - si `curl -i <site_url>no-existe/` sin `Accept: text/html` también devuelve la página: la
+    plantilla se elige por el Accept, y `*/*` debería caer en la de `application/json`;
+  - si la trust policy de LabRole incluye `apigateway.amazonaws.com`, que la integración del sitio
+    con S3 necesita.
+
+### Verificado localmente
+
+117 tests (unit + integración), typecheck de functions y frontend, build del frontend con `/prod`,
+`terraform fmt`/`validate`, tflint y actionlint.

@@ -170,6 +170,11 @@ export function staffRoutes(deps: StaffDependencies): Routes {
       const input = readMemberInput(request.body())
 
       let user = await users.findByEmail(input.email)
+      // Con contraseña, el dueño cree que está creando la cuenta. Si ya existe la registró otra persona,
+      // y agregarla en silencio le daría acceso al local a quien se adelantó a registrar ese mail.
+      if (user && input.password) {
+        throw new HttpError(409, 'EMAIL_TAKEN', 'An account with this email already exists. Add it without a password.')
+      }
       if (!user) {
         if (!input.password) throw notFound('USER_NOT_FOUND', 'No account uses this email. Send a password to create one.')
         user = await users.create({ email: input.email, password: input.password, displayName: input.displayName ?? input.email })

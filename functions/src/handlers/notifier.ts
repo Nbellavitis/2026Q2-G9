@@ -77,8 +77,13 @@ export async function notify(event: PublishedEvent, deps: NotifierDependencies):
     if (!(await deps.directory.claimNotification(record, now))) continue
 
     try {
-      await deps.mailer.send(destination, subject, body)
-      await deps.directory.markNotification(notice.entry.id, notice.type, notice.cycle, { status: 'SENT', at: now.toISOString() })
+      const outcome = await deps.mailer.send(destination, subject, body)
+      // Un aviso simulado (sin remitente, o un destinatario fuera del sandbox de SES) no salió por mail.
+      await deps.directory.markNotification(notice.entry.id, notice.type, notice.cycle, {
+        status: 'SENT',
+        at: now.toISOString(),
+        channel: outcome === 'simulated' ? 'LOG' : 'EMAIL',
+      })
       delivered++
     } catch (error) {
       await deps.directory.markNotification(notice.entry.id, notice.type, notice.cycle, {

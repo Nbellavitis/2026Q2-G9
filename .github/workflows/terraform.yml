@@ -28,12 +28,6 @@ permissions:
   contents: read
   pull-requests: write
 
-# Un solo estado: dos ejecuciones a la vez se pisarían. El lockfile de S3 lo impediría igual, pero
-# esperar en la cola es mejor que fallar.
-concurrency:
-  group: terraform-state
-  cancel-in-progress: false
-
 env:
   TF_VERSION: 1.16.4
   TFLINT_VERSION: v0.64.0
@@ -156,7 +150,7 @@ jobs:
       - name: Plan
         working-directory: ${{ env.TF_DIR }}
         run: |
-          terraform plan -input=false -no-color -out=tfplan | tee plan.txt
+          terraform plan -input=false -no-color -lock-timeout=10m -out=tfplan | tee plan.txt
           {
             echo '## Plan de Terraform'
             echo '```'
@@ -211,6 +205,12 @@ jobs:
 
   apply:
     name: Apply
+    # Un solo estado: un apply o un destroy espera al otro. Va en el job y no en el workflow porque un
+    # apply que espera aprobación retiene el grupo, y no debe frenar el validate ni el plan del push
+    # siguiente. Si llega otro apply mientras uno espera, GitHub cancela el viejo: su plan ya no sirve.
+    concurrency:
+      group: terraform-state
+      cancel-in-progress: false
     needs: plan
     if: >-
       (github.event_name == 'pull_request' && github.event.action != 'labeled') ||
@@ -246,7 +246,7 @@ jobs:
 
       - name: Apply
         working-directory: ${{ env.TF_DIR }}
-        run: terraform apply -input=false -no-color tfplan
+        run: terraform apply -input=false -no-color -lock-timeout=10m tfplan
 
       - name: Prueba de humo
         working-directory: ${{ env.TF_DIR }}
@@ -264,8 +264,12 @@ jobs:
           done
           echo
 
-          curl -fsS "$site" | grep -qi '<html' || { echo "La portada no devolvió HTML"; exit 1; }
+          curl -fsS -o index.html "$site" && grep -qi '<html' index.html || { echo "La portada no devolvió HTML"; exit 1; }
           curl -fsS -o /dev/null "${site}login/" || { echo "La página de login no cargó"; exit 1; }
+          # Una ruta que no existe: la página 404 del sitio, no el XML de S3.
+          status=$(curl -sS -o not-found.html -w '%{http_code}' -H 'Accept: text/html' "${site}no-existe/")
+          [ "$status" = 404 ] && grep -qi '<html' not-found.html \
+            || { echo "Una ruta inexistente respondió $status sin la página 404"; cat not-found.html; exit 1; }
           curl -fsS "${site}config.json" | jq -e '.userPoolId and .userPoolClientId' >/dev/null \
             || { echo "config.json no tiene los ids de Cognito"; exit 1; }
 
@@ -296,6 +300,12 @@ jobs:
 
   destroy:
     name: Destroy
+    # Un solo estado: un apply o un destroy espera al otro. Va en el job y no en el workflow porque un
+    # apply que espera aprobación retiene el grupo, y no debe frenar el validate ni el plan del push
+    # siguiente. Si llega otro apply mientras uno espera, GitHub cancela el viejo: su plan ya no sirve.
+    concurrency:
+      group: terraform-state
+      cancel-in-progress: false
     needs: build
     if: >-
       (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'destroy') ||
@@ -321,4 +331,4 @@ jobs:
 
       - name: Destroy
         working-directory: ${{ env.TF_DIR }}
-        run: terraform destroy -input=false -no-color -auto-approve
+        run: terraform destroy -input=false -no-color -lock-timeout=10m -auto-approve

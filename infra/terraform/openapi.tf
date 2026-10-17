@@ -118,15 +118,33 @@ locals {
     }
   }
 
+  # La página 404 del build, entera dentro de la plantilla. API Gateway la procesa con Velocity, y el
+  # HTML de Next trae `$` y `#`: el bloque `#[[ ... ]]#` hace que se copie tal cual. Sin el build (un
+  # destroy, por ejemplo) queda una página mínima.
+  not_found_page     = fileexists("${var.site_dir}/404.html") ? file("${var.site_dir}/404.html") : "<!doctype html><title>404</title><h1>404</h1>"
+  not_found_template = format("#[[%s]]#", local.not_found_page)
+
   site_integration = {
     type                = "aws"
     httpMethod          = "GET"
     credentials         = data.aws_iam_role.lab.arn
     passthroughBehavior = "when_no_match"
     responses = {
-      # Cualquier 4xx de S3 (la clave no existe) se devuelve como 404.
-      "4\\d{2}" = merge(local.site_response, { statusCode = "404" })
-      default   = merge(local.site_response, { statusCode = "200" })
+      # Cualquier 4xx de S3 (la clave no existe) es un 404 con la página del sitio en vez del XML de
+      # S3. Con `binary_media_types` en `*/*` la respuesta llega como binaria, y a una binaria no se le
+      # aplica plantilla: CONVERT_TO_TEXT la pasa a texto para que la plantilla la reemplace. La
+      # plantilla se elige por el Accept del pedido: un navegador pide text/html, y sin Accept vale
+      # application/json.
+      "4\\d{2}" = {
+        statusCode      = "404"
+        contentHandling = "CONVERT_TO_TEXT"
+        responseParameters = {
+          "method.response.header.Content-Type"  = "'text/html; charset=utf-8'"
+          "method.response.header.Cache-Control" = "'no-store'"
+        }
+        responseTemplates = { for type in ["text/html", "application/json"] : type => local.not_found_template }
+      }
+      default = merge(local.site_response, { statusCode = "200" })
     }
   }
 

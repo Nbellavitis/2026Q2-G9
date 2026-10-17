@@ -13,7 +13,7 @@ resource "aws_sesv2_email_identity" "sender" {
 
 # Las direcciones del grupo, para recibir los avisos de verdad mientras se prueba.
 resource "aws_sesv2_email_identity" "recipients" {
-  for_each = toset([for email in var.ses_verified_recipients : lower(email) if email != var.ses_sender_email])
+  for_each = toset([for email in var.ses_verified_recipients : lower(email) if lower(email) != lower(var.ses_sender_email == null ? "" : var.ses_sender_email)])
 
   email_identity = each.value
 }

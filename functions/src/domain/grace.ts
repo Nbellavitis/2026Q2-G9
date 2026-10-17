@@ -18,13 +18,27 @@ export function allocateEndKey(session: Session): string {
   return key
 }
 
-/** Vence a todos los llamados cuyo plazo ya pasó. Devuelve si cambió algo. */
+/**
+ * Cuántos vencimientos entran en una sesión. Cada uno escribe cuatro ítems (la entrada movida, su
+ * referencia y el evento) y una transacción admite cien: sin tope, una cola con 25 llamados vencidos
+ * no podría escribir nunca más, porque toda operación empieza venciendo a todos.
+ */
+export const MAX_EXPIRATIONS_PER_SESSION = 15
+
+/**
+ * Vence los llamados cuyo plazo ya pasó, los más viejos primero y a lo sumo
+ * {@link MAX_EXPIRATIONS_PER_SESSION}. Los que queden los vence la próxima sesión. Devuelve si
+ * cambió algo.
+ */
 export function expireDue(session: Session): boolean {
   const now = session.now.getTime()
-  const due = session.state.entries.filter(
-    (entry) =>
-      entry.status === 'CALLED' && entry.graceExpiresAt !== null && Date.parse(entry.graceExpiresAt) <= now,
-  )
+  const due = session.state.entries
+    .filter(
+      (entry) =>
+        entry.status === 'CALLED' && entry.graceExpiresAt !== null && Date.parse(entry.graceExpiresAt) <= now,
+    )
+    .sort((a, b) => Date.parse(a.graceExpiresAt ?? '') - Date.parse(b.graceExpiresAt ?? ''))
+    .slice(0, MAX_EXPIRATIONS_PER_SESSION)
   for (const entry of due) applyNoShow(session, entry, SYSTEM)
   return due.length > 0
 }

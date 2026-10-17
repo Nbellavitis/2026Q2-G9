@@ -210,7 +210,9 @@ export class DirectoryStore {
     entryId: string,
     type: NotificationRecord['type'],
     cycle: number,
-    outcome: { status: 'SENT'; at: string } | { status: 'FAILED'; reason: string },
+    outcome:
+      | { status: 'SENT'; at: string; channel?: NotificationRecord['channel'] }
+      | { status: 'FAILED'; reason: string },
   ): Promise<void> {
     await this.table.documents.send(
       new UpdateCommand({
@@ -218,12 +220,12 @@ export class DirectoryStore {
         Key: { PK: keys.entryPk(entryId), SK: keys.notificationSk(type, cycle) },
         UpdateExpression:
           outcome.status === 'SENT'
-            ? 'SET #status = :status, sentAt = :at, failureReason = :none'
+            ? 'SET #status = :status, sentAt = :at, failureReason = :none, channel = :channel'
             : 'SET #status = :status, failureReason = :reason',
         ExpressionAttributeNames: { '#status': 'status' },
         ExpressionAttributeValues:
           outcome.status === 'SENT'
-            ? { ':status': 'SENT', ':at': outcome.at, ':none': null }
+            ? { ':status': 'SENT', ':at': outcome.at, ':none': null, ':channel': outcome.channel ?? 'EMAIL' }
             : { ':status': 'FAILED', ':reason': outcome.reason },
       }),
     )

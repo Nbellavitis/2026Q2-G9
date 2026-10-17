@@ -182,6 +182,17 @@ describe('API de punta a punta', () => {
     expect(stranger.headers?.['Content-Type']).toBe('application/problem+json')
 
     users.byId.set(STAFF.sub, { id: STAFF.sub, email: STAFF.email, displayName: STAFF.name, createdAt: 'x' })
+    // Con contraseña, el dueño cree que crea la cuenta: si ya existe, no se la agrega en silencio.
+    const hijack = await asStaff({
+      method: 'POST',
+      resource: '/api/v1/establishments/{establishmentId}/members',
+      params: { establishmentId },
+      body: { email: STAFF.email, password: 'contraseña-nueva', role: 'OWNER' },
+    })
+    expect(hijack.statusCode).toBe(409)
+    expect(hijack.json.code).toBe('EMAIL_TAKEN')
+    expect(await f.directory.membership(STAFF.sub, establishmentId)).toBeNull()
+
     const added = await asStaff({
       method: 'POST',
       resource: '/api/v1/establishments/{establishmentId}/members',

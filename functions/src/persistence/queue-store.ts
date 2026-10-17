@@ -22,6 +22,9 @@ import * as keys from './keys.js'
 
 /** El máximo de una transacción de DynamoDB. */
 export const MAX_TRANSACTION_ITEMS = 100
+
+/** Cuántas sesiones de vencimiento corre una lectura antes de responder con lo que haya. */
+const MAX_EXPIRATION_ROUNDS = 5
 /**
  * Intentos ante un conflicto de versión. Con 5, una ráfaga de escaneos del QR sobre la misma cola
  * podía agotarlos y devolverle 409 a alguien que solo quería anotarse; 8 con backoff de hasta
@@ -134,14 +137,16 @@ export class QueueStore {
     options: Pick<MutateOptions, 'entryIds' | 'now'> & { consistent?: boolean } = {},
   ): Promise<QueueState> {
     const now = options.now ?? (() => new Date())
-    const state = await this.load(queueId, options.entryIds, { consistent: options.consistent ?? true })
-    if (!hasDueGrace(state.entries, now())) return state
-    // Si otro disparador ya la aplicó, el reintento relee y no encuentra nada: no es un error.
-    const { state: fresh } = await this.mutate(queueId, (session) => expireDue(session), {
-      ...(options.entryIds ? { entryIds: options.entryIds } : {}),
-      now,
-    })
-    return fresh
+    let state = await this.load(queueId, options.entryIds, { consistent: options.consistent ?? true })
+    // Cada sesión vence una cantidad acotada: con muchos llamados vencidos hacen falta varias.
+    for (let round = 0; round < MAX_EXPIRATION_ROUNDS && hasDueGrace(state.entries, now()); round++) {
+      // Si otro disparador ya la aplicó, el reintento relee y no encuentra nada: no es un error.
+      ;({ state } = await this.mutate(queueId, (session) => expireDue(session), {
+        ...(options.entryIds ? { entryIds: options.entryIds } : {}),
+        now,
+      }))
+    }
+    return state
   }
 
   /**

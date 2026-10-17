@@ -3,9 +3,11 @@
 
 import {
   AdminCreateUserCommand,
+  AdminDeleteUserCommand,
   AdminGetUserCommand,
   AdminSetUserPasswordCommand,
   CognitoIdentityProviderClient,
+  InvalidParameterException,
   InvalidPasswordException,
   ListUsersCommand,
   UserNotFoundException,
@@ -77,20 +79,27 @@ export class CognitoUsers implements UserDirectory {
         }),
       )
       const sub = attribute(User?.Attributes, 'sub') ?? User?.Username ?? input.email
-      await this.client.send(
-        new AdminSetUserPasswordCommand({
-          UserPoolId: this.userPoolId,
-          Username: sub,
-          Password: input.password,
-          Permanent: true,
-        }),
-      )
+      try {
+        await this.client.send(
+          new AdminSetUserPasswordCommand({
+            UserPoolId: this.userPoolId,
+            Username: sub,
+            Password: input.password,
+            Permanent: true,
+          }),
+        )
+      } catch (error) {
+        // Sin contraseña la cuenta no sirve, y si quedara, el reintento la encontraría y la agregaría
+        // igual: se borra para que el dueño pueda volver a intentar con otra contraseña.
+        await this.client.send(new AdminDeleteUserCommand({ UserPoolId: this.userPoolId, Username: sub }))
+        throw error
+      }
       return toUser(User?.Attributes, User?.UserCreateDate, sub)
     } catch (error) {
       if (error instanceof UsernameExistsException) {
         throw new HttpError(409, 'EMAIL_TAKEN', 'An account with this email already exists')
       }
-      if (error instanceof InvalidPasswordException) {
+      if (error instanceof InvalidPasswordException || error instanceof InvalidParameterException) {
         throw badRequest('VALIDATION_FAILED', 'The password does not meet the policy', { password: error.message })
       }
       throw error

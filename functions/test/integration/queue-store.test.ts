@@ -89,6 +89,22 @@ describe('QueueStore contra DynamoDB Local', () => {
     expect(after.entries[0]).toMatchObject({ status: 'WAITING', noShowCount: 1, notificationCycle: 1 })
   })
 
+  it('muchos llamados vencidos a la vez no traban la cola: se vencen en varias transacciones', async () => {
+    const queueId = await createQueue(f.queues, { gracePeriodSeconds: 60, noShowPolicy: 'REMOVE' })
+    for (let i = 0; i < 30; i++) {
+      await f.queues.mutate(queueId, (s) => join(s, { name: `Cliente ${i}`, email: `c${i}@x.y` }), {
+        now: at('2026-03-02T15:00:00Z'),
+      })
+      await f.queues.mutate(queueId, (s) => callNext(s, STAFF), { now: at('2026-03-02T15:00:00Z') })
+    }
+
+    // 30 vencimientos × 4 ítems no entran en una transacción. Sin tope, toda operación fallaría.
+    const late = at('2026-03-02T15:05:00Z')
+    const { result: ana } = await f.queues.mutate(queueId, (s) => join(s, { name: 'Ana', email: 'a@x.y' }), { now: late })
+    await f.queues.read(queueId, { now: late })
+    expect((await f.queues.load(queueId)).entries.map((entry) => entry.id)).toEqual([ana.id])
+  })
+
   it('cerrar una cola con mucha gente se libera en lotes que entran en una transacción', async () => {
     const queueId = await createQueue(f.queues)
     for (let i = 0; i < 70; i++) {
