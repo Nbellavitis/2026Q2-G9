@@ -249,22 +249,44 @@ jobs:
           set -euo pipefail
           site=$(terraform output -raw site_url)
           health=$(terraform output -raw health_url)
+          api="${site}api/v1"
 
           # Un deployment nuevo de API Gateway tarda unos segundos en propagarse.
           for attempt in $(seq 1 10); do
             if curl -fsS "$health"; then break; fi
-            if [ "$attempt" -eq 10 ]; then echo "La función de salud no respondió"; exit 1; fi
+            if [ "$attempt" -eq 10 ]; then echo "La API no respondió"; exit 1; fi
             sleep 6
           done
           echo
 
           curl -fsS "$site" | grep -qi '<html' || { echo "La portada no devolvió HTML"; exit 1; }
           curl -fsS -o /dev/null "${site}login/" || { echo "La página de login no cargó"; exit 1; }
+          curl -fsS "${site}config.json" | jq -e '.userPoolId and .userPoolClientId' >/dev/null \
+            || { echo "config.json no tiene los ids de Cognito"; exit 1; }
+
+          # El recorrido de un cliente en la cola de demo: unirse, ver su ticket e irse.
+          demo=$(terraform output -raw demo_queue_url 2>/dev/null || true)
+          if [ -n "$demo" ]; then
+            queue_id="${demo##*id=}"
+            status=$(curl -sS -o join.json -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+              -d '{"name":"Prueba de humo","email":"humo@queue.example","partySize":2,"locale":"es"}' \
+              "${api}/public/queues/${queue_id}/entries")
+            [ "$status" = "201" ] || { echo "Unirse a la cola de demo respondió $status"; cat join.json; exit 1; }
+            token=$(jq -r .ticketToken join.json)
+            curl -fsS "${api}/public/tickets/${token}" | jq -e '.status == "WAITING"' >/dev/null \
+              || { echo "El ticket no quedó esperando"; exit 1; }
+            curl -fsS -X DELETE "${api}/public/tickets/${token}" | jq -e '.status == "LEFT"' >/dev/null \
+              || { echo "No se pudo dejar la cola"; exit 1; }
+          fi
 
           {
             echo '## Desplegado'
             echo "- Sitio: $site"
             echo "- Salud: $health"
+            if [ -n "$demo" ]; then
+              echo "- Cola de demo: $demo"
+              echo "- Staff de demo: $(terraform output -raw demo_staff_email) (contraseña: \`terraform output -raw demo_staff_password\`)"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
   destroy:

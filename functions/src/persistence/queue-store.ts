@@ -290,6 +290,22 @@ export class QueueStore {
     return item ? items.strip<Entry>(item) : null
   }
 
+  /**
+   * El establecimiento de una cola, sin leer la cola entera. Nunca cambia, así que alcanza para
+   * autorizar antes de mutar.
+   */
+  async establishmentOf(queueId: string): Promise<string> {
+    const { Item } = await this.table.documents.send(
+      new GetCommand({
+        TableName: this.table.tableName,
+        Key: { PK: keys.queuePk(queueId), SK: keys.QUEUE_META_SK },
+        ProjectionExpression: 'establishmentId',
+      }),
+    )
+    if (!Item) throw notFound('QUEUE_NOT_FOUND', `Queue ${queueId} was not found`)
+    return String(Item['establishmentId'])
+  }
+
   /** La cola a la que pertenece una entrada. Es inmutable, así que no hace falta leer la entrada. */
   async queueIdOfEntry(entryId: string): Promise<string | null> {
     const ref = await this.get(keys.entryPk(entryId), keys.ENTRY_REF_SK)
@@ -309,6 +325,20 @@ export class QueueStore {
       ExpressionAttributeValues: { ':pk': keys.queuePk(queueId), ':from': keys.finishedSk(from), ':to': keys.finishedSk(to) },
     })
     return found.map((item) => items.strip<Entry>(item)).filter((entry) => (entry.finishedAt ?? '') < to)
+  }
+
+  /** Los últimos eventos de una cola, del más nuevo al más viejo: el historial del panel. */
+  async recentEvents(queueId: string, limit: number): Promise<Item[]> {
+    const { Items } = await this.table.documents.send(
+      new QueryCommand({
+        TableName: this.table.tableName,
+        KeyConditionExpression: 'PK = :pk',
+        ExpressionAttributeValues: { ':pk': keys.eventsPk(queueId) },
+        ScanIndexForward: false,
+        Limit: limit,
+      }),
+    )
+    return (Items ?? []) as Item[]
   }
 
   /** Los eventos de una cola, del más viejo al más nuevo. */

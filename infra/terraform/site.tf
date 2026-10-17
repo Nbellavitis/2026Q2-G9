@@ -14,3 +14,17 @@ resource "aws_s3_object" "site" {
   # el navegador los puede guardar un año. Todo lo demás se revalida en cada visita.
   cache_control = startswith(each.key, "_next/static/") ? "public, max-age=31536000, immutable" : "no-cache"
 }
+
+# Lo que el sitio necesita saber de esta infraestructura y recién se conoce después del apply: los
+# ids de Cognito. Se lee al cargar la página, así el build del frontend no depende del despliegue.
+resource "aws_s3_object" "site_config" {
+  bucket = module.private_buckets["spa"].name
+  key    = "config.json"
+  content = jsonencode({
+    region           = local.region
+    userPoolId       = aws_cognito_user_pool.this.id
+    userPoolClientId = aws_cognito_user_pool_client.web.id
+  })
+  content_type  = "application/json"
+  cache_control = "no-cache"
+}

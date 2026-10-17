@@ -33,12 +33,17 @@ export class DirectoryStore {
   constructor(private readonly table: TableConfig) {}
 
   /** Crea un establecimiento y deja a quien lo creó como dueño, en una sola transacción. */
-  async createEstablishment(establishment: Establishment, ownerId: string): Promise<Membership> {
+  async createEstablishment(
+    establishment: Establishment,
+    ownerId: string,
+    profile: { email?: string; displayName?: string } = {},
+  ): Promise<Membership> {
     const membership: Membership = {
       userId: ownerId,
       establishmentId: establishment.id,
       role: 'OWNER',
       createdAt: establishment.createdAt,
+      ...profile,
     }
     const [byUser, byEstablishment] = items.membershipItems(membership)
     await this.table.documents.send(
@@ -49,6 +54,17 @@ export class DirectoryStore {
       }),
     )
     return membership
+  }
+
+  /** Cambia el nombre o la zona horaria. Falla si el establecimiento no existe. */
+  async updateEstablishment(establishment: Establishment): Promise<void> {
+    await this.table.documents.send(
+      new PutCommand({
+        TableName: this.table.tableName,
+        Item: items.establishmentItem(establishment),
+        ConditionExpression: 'attribute_exists(PK)',
+      }),
+    )
   }
 
   async establishment(establishmentId: string): Promise<Establishment | null> {
@@ -90,7 +106,7 @@ export class DirectoryStore {
     const membership = await this.membership(userId, establishmentId)
     if (!membership) throw forbidden('NOT_A_MEMBER', 'You are not a member of this establishment')
     if (role === 'OWNER' && membership.role !== 'OWNER') {
-      throw forbidden('OWNER_REQUIRED', 'Only an owner can do this')
+      throw forbidden('OWNER_ONLY', 'Only an owner can do this')
     }
     return membership
   }

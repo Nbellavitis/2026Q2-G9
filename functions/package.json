@@ -15,13 +15,18 @@
     "test:integration": "vitest run --project integration"
   },
   "devDependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "3.1144.0",
     "@aws-sdk/client-dynamodb": "3.1144.0",
     "@aws-sdk/lib-dynamodb": "3.1144.0",
     "@types/aws-lambda": "8.10.164",
     "@types/node": "22.20.4",
+    "@types/qrcode": "1.5.6",
     "esbuild": "0.28.2",
     "testcontainers": "12.2.0",
     "typescript": "5.9.3",
     "vitest": "5.0.3"
+  },
+  "dependencies": {
+    "qrcode": "1.5.4"
   }
 }

@@ -1,6 +1,6 @@
 import { getToken, setToken } from './session'
 import type {
-  AuthResult,
+  UserView,
   EntryStatus,
   EntryView,
   EstablishmentView,
@@ -22,6 +22,7 @@ import type {
 
 export const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080').replace(/\/$/, '')
 const V1 = `${API_BASE}/api/v1`
+const STREAMS = process.env.NEXT_PUBLIC_STREAMS === 'sse'
 
 /** An RFC 7807 problem response, surfaced with the backend's stable `code` intact. */
 export class ApiError extends Error {
@@ -50,7 +51,27 @@ interface RequestOptions {
   signal?: AbortSignal
 }
 
+/**
+ * How many times a request that lost a race is sent again. Every change to a queue is checked
+ * against the version it read; when two people change the same queue at once, one of them gets 409
+ * CONCURRENT_MODIFICATION after the server already retried several times. Nothing was written, so
+ * sending it again is safe, and it almost always goes through.
+ */
+const CONFLICT_RETRIES = 2
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await send<T>(path, options)
+    } catch (cause) {
+      const lostRace = cause instanceof ApiError && cause.status === 409 && cause.code === 'CONCURRENT_MODIFICATION'
+      if (!lostRace || attempt >= CONFLICT_RETRIES || options.signal?.aborted) throw cause
+      await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1) + Math.random() * 150))
+    }
+  }
+}
+
+async function send<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, auth = true, signal } = options
   const headers: Record<string, string> = { Accept: 'application/json' }
 
@@ -117,19 +138,9 @@ function toApiError(status: number, payload: unknown): ApiError {
 }
 
 export const api = {
+  // Signing in and signing up talk to Cognito directly (cognito.ts); the API only knows who you are.
   auth: {
-    register: (body: {
-      email: string
-      password: string
-      displayName: string
-      establishmentName: string
-      timezone?: string
-    }) => request<AuthResult>('/auth/register', { method: 'POST', body, auth: false }),
-
-    login: (body: { email: string; password: string }) =>
-      request<AuthResult>('/auth/login', { method: 'POST', body, auth: false }),
-
-    me: () => request<AuthResult['user']>('/auth/me'),
+    me: () => request<UserView>('/auth/me'),
   },
 
   establishments: {
@@ -196,10 +207,15 @@ export const api = {
     qrUrl: (queueId: string, size = 512) => `${V1}/public/queues/${queueId}/qr?size=${size}`,
   },
 
+  /**
+   * Server-Sent Events, only against the local Java backend (`NEXT_PUBLIC_STREAMS=sse` in
+   * `.env.development`). The serverless API has no streams: until its WebSocket exists, `null` makes
+   * the live views fall back to polling - and keeps the staff token out of a URL.
+   */
   streams: {
     /** EventSource cannot send headers, so the staff stream takes the token in the query string. */
-    queue: (queueId: string, token: string) =>
-      `${V1}/queues/${queueId}/stream?access_token=${encodeURIComponent(token)}`,
-    ticket: (ticketToken: string) => `${V1}/public/tickets/${ticketToken}/stream`,
+    queue: (queueId: string, token: string): string | null =>
+      STREAMS ? `${V1}/queues/${queueId}/stream?access_token=${encodeURIComponent(token)}` : null,
+    ticket: (ticketToken: string): string | null => (STREAMS ? `${V1}/public/tickets/${ticketToken}/stream` : null),
   },
 }

@@ -25,7 +25,7 @@ describe('DirectoryStore contra DynamoDB Local', () => {
     await f.directory.putMembership({ userId: 'staff-sub', establishmentId: 'est-a', role: 'STAFF', createdAt: 'x' })
     await expect(f.directory.requireMember('staff-sub', 'est-a')).resolves.toMatchObject({ role: 'STAFF' })
     await expect(f.directory.requireMember('staff-sub', 'est-a', 'OWNER')).rejects.toMatchObject({
-      code: 'OWNER_REQUIRED',
+      code: 'OWNER_ONLY',
       status: 403,
     })
     await f.directory.removeMembership('staff-sub', 'est-a')

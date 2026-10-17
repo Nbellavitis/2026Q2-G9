@@ -20,6 +20,10 @@ await Promise.all(
       format: 'esm',
       // El runtime de Lambda ya trae el SDK v3 de AWS: no hace falta empaquetarlo.
       external: ['@aws-sdk/*'],
+      // Algunas dependencias son CommonJS y piden módulos de Node con require (qrcode usa zlib y
+      // stream). En un bundle ESM ese require no existe y esbuild lo reemplaza por uno que falla en
+      // ejecución: este banner lo vuelve a crear.
+      banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
       // Sin minificar: los errores en CloudWatch se leen con los nombres reales.
       minify: false,
       sourcemap: false,

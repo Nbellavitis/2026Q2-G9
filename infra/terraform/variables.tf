@@ -72,3 +72,54 @@ variable "api_throttle_burst_limit" {
   type        = number
   default     = 100
 }
+
+variable "joins_per_minute" {
+  description = "Uniones a una cola que acepta la API por IP y por minuto, antes de responder 429."
+  type        = number
+  default     = 20
+
+  validation {
+    condition     = var.joins_per_minute >= 1
+    error_message = "Tiene que permitir al menos una unión por minuto."
+  }
+}
+
+variable "public_write_rate_limit" {
+  description = "Pedidos por segundo sostenidos en las rutas que escribe un cliente anónimo (unirse, salir)."
+  type        = number
+  default     = 10
+}
+
+variable "public_write_burst_limit" {
+  description = "Ráfaga máxima en las rutas que escribe un cliente anónimo."
+  type        = number
+  default     = 20
+}
+
+variable "session_hours" {
+  description = "Horas que dura una sesión del staff antes de volver a iniciar sesión."
+  type        = number
+  default     = 12
+
+  validation {
+    condition     = var.session_hours >= 1 && var.session_hours <= 24
+    error_message = "Cognito acepta tokens de 1 a 24 horas."
+  }
+}
+
+variable "cargar_demo" {
+  description = "Carga un local de demo con dos colas y un usuario de staff, para poder probar sin configurar nada."
+  type        = bool
+  default     = true
+}
+
+variable "demo_email" {
+  description = "Email del usuario de staff de demo. Se usa para iniciar sesión."
+  type        = string
+  default     = "demo@queue.example"
+
+  validation {
+    condition     = can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.demo_email))
+    error_message = "El email de demo tiene que ser una dirección válida."
+  }
+}

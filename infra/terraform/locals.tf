@@ -47,15 +47,44 @@ locals {
   # Una entrada por función. El for_each de functions.tf recorre este mapa, así que sumar una
   # función es sumar una entrada acá y su handler en functions/src/handlers/.
   functions = {
-    health = {
-      description = "Prueba de humo: escribe y lee un ítem en la tabla principal."
-      memory_size = 256
+    # Los clientes, sin sesión: ver la cola, unirse, su ticket, el QR y la prueba de salud.
+    public = {
+      description = "API pública: clientes anónimos, autorizados por su ticket."
+      # El QR se genera en memoria: con más memoria, Lambda también da más CPU.
+      memory_size = 512
       timeout     = 10
+      environment = {
+        TABLE_NAME       = module.main_table.dynamodb_table_id
+        JOINS_PER_MINUTE = tostring(var.joins_per_minute)
+      }
+    }
+    # El panel. Recibe el usuario ya validado por el authorizer de Cognito.
+    staff = {
+      description = "API del staff: detrás del authorizer de Cognito."
+      memory_size = 512
+      timeout     = 15
+      environment = {
+        TABLE_NAME   = module.main_table.dynamodb_table_id
+        USER_POOL_ID = aws_cognito_user_pool.this.id
+      }
+    }
+    # Carga los datos de demo. La invoca Terraform (seed.tf), no API Gateway.
+    seed = {
+      description = "Datos de demo: un local con dos colas y sus carriles."
+      memory_size = 256
+      timeout     = 30
       environment = {
         TABLE_NAME = module.main_table.dynamodb_table_id
       }
     }
   }
+
+  # ---------------------------------------------------------------------------------------------
+  # Datos de demo
+  # ---------------------------------------------------------------------------------------------
+
+  demo            = jsondecode(file("${path.module}/seed/demo.json"))
+  demo_staff_name = "Staff de demo"
 
   # ---------------------------------------------------------------------------------------------
   # Sitio estático
@@ -87,41 +116,4 @@ locals {
     { for file in local.page_files : trimsuffix(file, "index.html") => file },
     { for file in local.page_files : trimsuffix(file, "/index.html") => file },
   )
-
-  # ---------------------------------------------------------------------------------------------
-  # Rutas del sitio en API Gateway
-  # ---------------------------------------------------------------------------------------------
-
-  # La raíz siempre devuelve index.html; cualquier otra ruta se busca en S3 con la misma clave que
-  # trae la URL. Las dos rutas comparten todo lo demás, así que se crean con un solo for_each.
-  site_routes = {
-    root = {
-      resource_id            = aws_api_gateway_rest_api.this.root_resource_id
-      s3_key                 = "index.html"
-      method_parameters      = {}
-      integration_parameters = {}
-    }
-    proxy = {
-      resource_id            = aws_api_gateway_resource.site_proxy.id
-      s3_key                 = "{key}"
-      method_parameters      = { "method.request.path.proxy" = true }
-      integration_parameters = { "integration.request.path.key" = "method.request.path.proxy" }
-    }
-  }
-
-  # 200 cuando S3 encuentra el objeto; cualquier 4xx de S3 (la clave no existe) se devuelve como 404.
-  site_responses = {
-    "200" = null
-    "404" = "4\\d{2}"
-  }
-
-  # Cada ruta con cada respuesta posible.
-  site_route_responses = {
-    for pair in setproduct(keys(local.site_routes), keys(local.site_responses)) :
-    "${pair[0]}-${pair[1]}" => {
-      route             = pair[0]
-      status_code       = pair[1]
-      selection_pattern = local.site_responses[pair[1]]
-    }
-  }
 }

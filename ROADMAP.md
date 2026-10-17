@@ -234,43 +234,45 @@ carreras están cubiertas por tests. **Cumplido**: ver [AVANCE-ENTREGA-3.md](AVA
 
 ## Fase 3 · API síncrona y Cognito
 
-- [ ] Terraform: user pool de Cognito con verificación de email y su cliente (sin secreto de
+- [x] Terraform: user pool de Cognito con verificación de email y su cliente (sin secreto de
       cliente, porque lo usa el navegador).
-- [ ] Handlers `functions/src/handlers/public.ts` y `staff.ts` sobre `QueueStore` y
+- [x] Handlers `functions/src/handlers/public.ts` y `staff.ts` sobre `QueueStore` y
       `DirectoryStore`. `staff` toma el usuario (`sub`) del token que ya validó API Gateway.
-- [ ] Terraform: rutas de la API REST.
+- [x] Terraform: rutas de la API REST.
   - `/api/v1/public/*` → `λ public`, sin authorizer.
   - `/api/v1/*` → `λ staff`, con el **authorizer de Cognito**.
-  - Validación del body con JSON Schema y *throttling* por método.
+  - ~~Validación del body con JSON Schema~~ (descartada, ver el avance) y *throttling* por método.
   - Se eliminan la Lambda y la tabla de prueba de la Fase 1.
-- [ ] Límite por IP en `λ public` (§3.1), con la IP de `requestContext.identity.sourceIp`: el
+- [x] Límite por IP en `λ public` (§3.1), con la IP de `requestContext.identity.sourceIp`: el
       header `X-Forwarded-For` lo puede inventar cualquiera.
-- [ ] Decodificar el body cuando `isBase64Encoded` es `true`: con `binary_media_types = ["*/*"]`,
+- [x] Decodificar el body cuando `isBase64Encoded` es `true`: con `binary_media_types = ["*/*"]`,
       API Gateway entrega en base64 también los JSON. O acotar los tipos binarios a fuentes e imágenes.
-- [ ] Autorizar contra el establecimiento de la cola **leída**, nunca contra un id que mande el
+- [x] Autorizar contra el establecimiento de la cola **leída**, nunca contra un id que mande el
       cliente: `requireMember(sub, state.queue.establishmentId)`. Para operar por id de entrada,
       resolver la cola con `queueIdOfEntry` y recién ahí verificar la membresía.
-- [ ] La vista pública de la cola (la página de ingreso, que se refresca cada 15 s) con
+- [x] La vista pública de la cola (la página de ingreso, que se refresca cada 15 s) con
       `read(queueId, { consistent: false })`; el ticket del cliente, siempre consistente.
-- [ ] Throttling por método en lugar de uno solo para `*/*`: hoy el techo de 50 rps lo comparten el
+- [x] Throttling por método en lugar de uno solo para `*/*`: hoy el techo de 50 rps lo comparten el
       sitio, los polls y los joins, y veinte personas escaneando el mismo QR piden cientos de
       archivos del sitio a la vez.
-- [ ] El frontend reintenta ante `409 CONCURRENT_MODIFICATION` antes de mostrar un error.
-- [ ] Frontend:
+- [x] El frontend reintenta ante `409 CONCURRENT_MODIFICATION` antes de mostrar un error.
+- [x] Frontend:
   - `basePath: '/prod'` y las URLs, el id del user pool y el del cliente leídos de `config.json`,
     que escribe Terraform;
   - login y registro contra Cognito, manteniendo las páginas actuales (sin el Hosted UI, así no
     hace falta la Lambda puente para el redirect por HTTPS).
-- [ ] **Datos de demo** (la consigna los permite): un establecimiento, dos colas con carriles, sus
+- [x] **Datos de demo** (la consigna los permite): un establecimiento, dos colas con carriles, sus
       ítems de membresía y un usuario de staff en Cognito, cargados desde `seed/demo.json`. Se activan
       con `var.cargar_demo`. La contraseña del usuario la genera `random_password` y sale como output
       sensible.
-- [ ] **Outputs para la cátedra:** URL del sitio, URL de la cola de demo (la del QR) y el usuario y
+- [x] **Outputs para la cátedra:** URL del sitio, URL de la cola de demo (la del QR) y el usuario y
       la contraseña de staff (`terraform output -raw contrasena_demo`).
-- [ ] La prueba de humo del pipeline pasa a anotarse en la cola de demo.
+- [x] La prueba de humo del pipeline pasa a anotarse en la cola de demo.
 
 **Listo cuando:** desde la URL que imprime `terraform output` se puede entrar como staff, unirse como
-cliente y llamar, todo desplegado por el pipeline. Sin tiempo real todavía.
+cliente y llamar, todo desplegado por el pipeline. Sin tiempo real todavía. **Código completo y
+verificado localmente; falta correrlo en el lab.** Las diferencias con este plan (la validación con
+JSON Schema, entre otras) están en [AVANCE-ENTREGA-3.md](AVANCE-ENTREGA-3.md).
 
 ---
 

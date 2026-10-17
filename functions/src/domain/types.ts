@@ -56,6 +56,12 @@ export interface Membership {
   establishmentId: string
   role: MembershipRole
   createdAt: string
+  /**
+   * Copia del email y del nombre que tenía en Cognito al sumarse. El listado de miembros se lee de
+   * acá, sin una llamada a Cognito por cada uno.
+   */
+  email?: string
+  displayName?: string
 }
 
 /** Configuración y contadores de una cola: el ítem `META` de su partición. */

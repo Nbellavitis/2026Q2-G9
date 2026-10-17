@@ -7,7 +7,7 @@ fase anota qué se construyó, qué se decidió en el camino y por qué, qué se
 |---|---|
 | 1 · Esqueleto que camina: Terraform y pipeline | **Código completo y verificado localmente. Falta correrlo en el lab.** |
 | 2 · Dominio y persistencia en DynamoDB | **Completa y verificada localmente** (94 tests, DynamoDB Local). La tabla `q-connections` falta crearla en el lab |
-| 3 · API síncrona y Cognito | Pendiente |
+| 3 · API síncrona y Cognito | **Código completo y verificado localmente** (104 tests, bundles probados contra DynamoDB Local). Falta correrlo en el lab |
 | 4 · Bus de eventos | Pendiente |
 | 5 · Consumidores y tiempo real | Pendiente |
 | 6 · Retirar lo anterior | Pendiente |
@@ -300,8 +300,121 @@ AWS tal cual. Los handlers tienen que traducirla a `409`, no dejar que salga com
 | Crear `q-connections` con `LabRole` | El `apply` falla con `AccessDenied` en DynamoDB |
 | Que el job `build` corra Testcontainers en GitHub Actions | El paso "Tests de las funciones" falla al levantar el contenedor; el runner `ubuntu-latest` trae Docker, así que no debería |
 
-### Falta para la Fase 3
+### Falta para la Fase 3 (resuelto en la Fase 3)
 
 - Los handlers `public` y `staff` sobre `QueueStore` y `DirectoryStore`, y sus rutas en API Gateway.
 - La creación de colas desde la API (`QueueStore.create` + `newQueueState` ya existen).
 - La traducción de `DomainError` a RFC 7807 en la respuesta HTTP.
+
+---
+
+## Fase 3 · API síncrona y Cognito
+
+### Decisiones previas
+
+| Decisión | Elegido |
+|---|---|
+| Confirmación de cuentas | **Automática**, con una Lambda de pre sign-up: el registro sigue siendo un solo paso y no depende del límite de 50 emails diarios de Cognito |
+| Inicio de sesión | **USER_PASSWORD_AUTH con `fetch`**, sin SDK: la contraseña viaja por TLS a Cognito, como antes al backend Java |
+
+### Qué se construyó
+
+```
+functions/src/
+  http/api.ts                  pedido, respuestas RFC 7807 sin campos null, router por plantilla de ruta
+  api/views.ts                 las vistas que faltaban, con la forma exacta de QueueViewFactory (Java)
+  api/input.ts                 tipos de cada campo del body verificados antes de llegar al dominio
+  api/users.ts                 los usuarios en Cognito, detrás de una interfaz (en memoria en los tests)
+  handlers/public.ts           8 rutas: salud, cola, disponibilidad, QR, unirse, ticket, salir, avisos
+  handlers/staff.ts            26 rutas: sesión, establecimientos, miembros, colas, carriles, entradas, métricas
+  handlers/cognito-pre-signup.ts  confirma en el acto los registros propios
+  handlers/seed.ts             datos de demo con las mismas operaciones del dominio
+functions/test/integration/api.test.ts   10 tests de punta a punta con eventos de API Gateway
+infra/terraform/
+  auth.tf                      user pool, cliente web sin secreto, trigger y su permiso
+  openapi.tf                   la API como tabla de rutas → documento OpenAPI 3
+  api.tf                       API REST desde el documento, permisos, deployment, stage, throttling
+  seed.tf · seed/demo.json     usuario de demo en Cognito y carga de datos por invocación de Lambda
+  site.tf                      + config.json con los ids de Cognito
+frontend/src/lib/
+  config.ts                    lee config.json al cargar (o variables de entorno en desarrollo)
+  cognito.ts                   registro e inicio de sesión contra Cognito, errores con los códigos de la API
+  auth.tsx                     login y registro por Cognito; el registro crea el local con la API
+  api.ts                       sin login propio; reintenta ante 409 CONCURRENT_MODIFICATION
+```
+
+### Decisiones que se apartan del roadmap
+
+1. **La API se define con un documento OpenAPI, no con recursos sueltos.** Con 34 rutas, un recurso,
+   un método, una integración y sus respuestas por ruta serían cientos de bloques casi iguales. Las
+   rutas son una tabla en `openapi.tf` y el documento sale de ella con expresiones `for`: sumar un
+   endpoint es sumar una línea. El deployment se rehace cuando cambia el hash del documento.
+2. **Sin validación con JSON Schema en API Gateway.** Con `binary_media_types = ["*/*"]` (que hace
+   falta para servir fuentes e imágenes desde S3), API Gateway trata también los JSON como binarios,
+   y no está garantizado que valide un cuerpo binario: en el peor caso rechazaría todos los joins.
+   La validación vive en `api/input.ts` y en el dominio, con respuestas RFC 7807 por campo.
+3. **La ruta de salud la atiende `λ public`**, sin una función propia: se elimina `health` y la
+   prueba de humo sigue teniendo a qué consultar.
+4. **Los datos de demo se cargan invocando una Lambda (`aws_lambda_invocation`)**, no con
+   `aws_dynamodb_table_item`. Escribir los ítems a mano duplicaría la forma de los datos (la cola
+   tiene 25 campos, con versión y secuencias) y se desincronizaría del código. La función usa las
+   mismas operaciones del dominio que la API y es idempotente.
+5. **La Lambda del trigger de Cognito es un módulo aparte.** El user pool la referencia y la función
+   del staff referencia al user pool: en el mismo `for_each`, eso es un ciclo.
+6. **El SSE queda apagado en los builds desplegados** (`NEXT_PUBLIC_STREAMS`) hasta la Fase 5: las
+   rutas de stream no existen, y el del staff pondría el token de Cognito en la URL. Las pantallas
+   se mantienen al día con el polling de respaldo que ya tenía `useLiveResource`.
+7. **El token que usa la API es el ID token de Cognito**, que es el que valida el authorizer sin
+   configurar scopes de OAuth. Dura `session_hours` (12 por defecto), como el token de la versión Java.
+8. **El código `OWNER_REQUIRED` pasa a ser `OWNER_ONLY`**, el de la API Java y el que traduce el
+   frontend.
+9. **El listado de miembros guarda el email y el nombre en la membresía**, así se lee sin una llamada
+   a Cognito por cada persona.
+
+### Problemas encontrados y resueltos
+
+| Problema | Cómo se notó | Arreglo |
+|---|---|---|
+| La librería del QR es CommonJS y pide `zlib`, `fs` y `stream` con `require`; en un bundle ESM, esbuild lo reemplaza por un `require` que falla en ejecución | Bundle de prueba: `Dynamic require of "fs" is not supported` | Un banner en `build.mjs` que crea `require` con `createRequire` |
+| Un `*/` dentro de un comentario de bloque en un test cortaba el comentario | Error de parseo | Comentario de línea |
+| Si una transacción cae por una condición que no es la versión, el error de AWS salía como 500 | Revisión de la Fase 2 | El router lo responde como `409 CONCURRENT_MODIFICATION` |
+
+### Verificado localmente
+
+| Qué | Resultado |
+|---|---|
+| `functions`: typecheck y los 104 tests | En verde. Los 10 nuevos recorren la API de punta a punta: crear local y cola, unirse con el body en base64, tablero, llamar, ticket, atender, historial, métricas, salir, autorización por la cola leída, validación de tipos y banderas `clear*`, carriles y disponibilidad, límite por IP, QR, 404 con código estable, 401 sin claims y datos de demo idempotentes |
+| Los bundles, no el código fuente, contra DynamoDB Local | La carga de demo desde `demo.json`, la página de ingreso con los dos carriles, un grupo de 4 que cae en "3 o más", el QR como PNG y la salud |
+| Frontend: typecheck y build con `/prod` | En verde |
+| Terraform `fmt`, `validate` y `tflint` | Sin errores ni advertencias |
+| El documento OpenAPI evaluado con `terraform console` | 25 rutas de la API más las 2 del sitio, parámetros de path, authorizer solo en las del staff, errores de API Gateway en RFC 7807 |
+| `actionlint` | Sin errores. La prueba de humo ahora también se une a la cola de demo, ve su ticket y se va |
+
+### Sin verificar: necesita el lab
+
+| Riesgo | Cómo se nota | Plan B |
+|---|---|---|
+| Cognito no puede invocar el trigger con el permiso que da Terraform | El registro o el usuario de demo fallan con `AccessDeniedException` del trigger | Quitar el trigger y confirmar con `AdminConfirmSignUp` desde la API |
+| API Gateway rechaza algo del documento OpenAPI | El `apply` de `aws_api_gateway_rest_api` falla con el detalle del import | Ajustar el documento: el error dice qué ruta |
+| `method_settings` no acepta la ruta con `{queueId}` | El `apply` del throttling por ruta falla | Dejar solo el techo general `*/*` |
+| `LabRole` no tiene permisos de administración de Cognito | `/auth/me` o el alta de miembros responden 500 | `/auth/me` ya cae en los claims del token si Cognito no responde nada |
+
+### Para probar después del apply
+
+1. `terraform output -raw site_url` abre el sitio.
+2. `terraform output -raw demo_queue_url` es la cola de demo, como la ve un cliente.
+3. Entrar al panel con `terraform output -raw demo_staff_email` y
+   `terraform output -raw demo_staff_password`.
+
+
+### Rúbrica: lo que suma esta fase
+
+| Criterio | Dónde |
+|---|---|
+| Módulos propios | `lambda-function` pasa a usarse 4 veces: el `for_each` de `functions.tf` (public, staff, seed) y `module.pre_signup` (`auth.tf`) |
+| `for_each` | Permisos de API Gateway por función y techos de throttling por ruta (`api.tf`) |
+| `count` | Usuario de demo, su contraseña y la carga de datos, según `var.cargar_demo` (`seed.tf`) |
+| `depends_on` | El usuario de demo espera al permiso del trigger: crearlo invoca la Lambda, y nada lo referencia (`seed.tf`) |
+| `lifecycle` | `create_before_destroy` en el deployment, que ahora se rehace con el hash del documento OpenAPI |
+| Funciones | `jsondecode`, `file`, `regexall`, `distinct`, `split`, `lower`, `replace`, `trimprefix`, `tostring`, `try`, además de las de la Fase 1 |
+| Locals | La tabla de rutas y el documento OpenAPI armado a partir de ella (`openapi.tf`), los datos de demo |

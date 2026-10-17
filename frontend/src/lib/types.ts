@@ -69,15 +69,6 @@ export interface EstablishmentView {
   createdAt: string
 }
 
-export interface AuthResult {
-  accessToken: string
-  tokenType: string
-  expiresInSeconds: number
-  expiresAt: string
-  user: UserView
-  establishment?: EstablishmentView
-}
-
 export interface MemberView {
   membershipId: string
   userId: string
