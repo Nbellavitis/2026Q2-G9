@@ -82,6 +82,7 @@ IAM. Secrets Manager sale del diseño.
 | 9 | **Funciones en TypeScript, sin SnapStart ni alias.** Donde el documento dice "Java + SnapStart" o módulos Maven (`q-domain`, `q-dynamo`, `q-fn-*`), vale `functions/src/domain`, `functions/src/persistence` y un handler por función en `functions/src/handlers` | [Decisiones tomadas](#decisiones-tomadas) |
 | 10 | **`λ lifecycle` libera en lotes de 24, no de 30.** Cada entrada liberada escribe cuatro ítems (borrar el SK viejo, escribir el nuevo, actualizar su referencia y su evento), y 24 × 4 + la cola = 97 entra en una transacción; 30 no entraba | Medido en la Fase 2 |
 | 11 | **Sin `activeCount` en `META`.** Cada mutación ya lee todas las entradas activas de la cola, así que la capacidad se cuenta sobre lo leído, bajo la misma versión. Un contador más sería un dato duplicado que puede desincronizarse | Fase 2 |
+| 12 | **Volver a la fila a alguien que había terminado es un ingreso nuevo.** Pasa por los controles de `join` y en su orden: su carril si todavía acepta su tamaño (si no, el que lo acepte hoy), el tope de ese carril y el de la cola | Su carril se pudo apagar o retirar mientras estaba afuera: la regla de los carriles solo cuenta a los activos. Revisión de las fases 1 a 5 |
 
 ---
 

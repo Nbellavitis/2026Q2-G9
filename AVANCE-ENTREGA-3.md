@@ -682,3 +682,33 @@ Para mirar, sin corregir:
 
 Verificado: 118 tests, typecheck, `terraform fmt`/`validate` (también con los bundles vacíos del
 job `destroy`), tflint y actionlint. **Nada de las Fases 1 a 5 corrió todavía en el lab.**
+
+---
+
+## Revisión de las fases 1 a 5
+
+Revisión hecha con el código local contra todo lo que se puede verificar sin el lab: `fmt`,
+`validate`, tflint, actionlint, typecheck, los tests, y una comparación entre las rutas de
+`openapi.tf` y las de los handlers (8 públicas y 27 de staff, coinciden exactamente y ninguna de
+staff queda sin authorizer). Corregido:
+
+| Hallazgo | Qué pasaba | Arreglo |
+|---|---|---|
+| Volver a la fila salteaba la regla de los carriles | La regla que impide apagar o retirar un carril con gente solo cuenta a los activos. Quien ya había terminado no lo es, así que su carril se podía apagar mientras estaba afuera, y `requeue` lo devolvía a ese carril sin mirarlo: apagado, el round robin no lo visita; retirado, no aparece en ninguna tarjeta del tablero aunque cuente en "Esperando". Solo se llegaba por la API: el botón de la interfaz actúa sobre llamados o en atención | Traer de vuelta a alguien que había terminado es un ingreso nuevo, con los controles de `join` y en su orden: su carril si todavía acepta su tamaño, si no el que lo acepte hoy (o `NO_COMPATIBLE_LANE`); después el tope de ese carril (`LANE_FULL`) y el de la cola. El evento registra el cambio de carril. 10 tests, dos fijando cuál error gana si fallan dos controles |
+| Filas del tablero de distinta altura en escritorio | La celda de la espera usaba `sm:block`, que mira la ventana. En una columna de ~450 px a 1400 px de ventana aparecía igual, y "Sin espera" mandaba los botones a una segunda línea y "25 min" no: filas de 106 o 78 px según el texto | Consulta de contenedor: la lista es `@container` y la celda `@lg:block`. 62 px todas a 1400 px; oculta y sin desborde a 375 px |
+| `app.env` sin ignorar | El archivo del despliegue manual del TP2, con la contraseña de RDS y el app password de Gmail en texto plano, estaba en el árbol de trabajo a un `git add .` del repositorio público | `app.env` y `frontend/web.zip` en `.gitignore` |
+
+**Decidido, sin cambios:** se mantiene que no se puede apagar ni retirar un carril con gente activa,
+con ninguna estrategia. Volver a la fila no la debilita: quien había terminado ya no estaba en el
+carril, y lo que se hace ahora es readmitirlo con los mismos controles que a cualquiera que llega.
+
+Para mirar, sin corregir:
+
+| Tema | Qué se sabe |
+|---|---|
+| `races.test.ts`, "tres a la vez" | Falló 1 vez en ~29 corridas de la suite completa y no se pudo reproducir. **No es un error del control optimista**: el ítem `META` va con `version = :read` dentro de la misma transacción, así que dos escrituras sobre la misma versión no pueden confirmarse las dos. Tampoco es el timeout (60 s) ni agotar los 10 intentos (falló en 197 ms, una ronda). Si vuelve a pasar en el pipeline, la causa queda en la salida del test: DynamoDB pone los motivos en el propio mensaje del error (`Transaction cancelled, please refer cancellation reasons for specific reasons [None, ConditionalCheckFailed]`, comprobado contra DynamoDB Local) |
+| `reasons[0]` en `commit` | Solo reconoce `ConditionalCheckFailed` en la posición 0. Una condición fallida en otra posición sale de `commit` sin traducir; en la API, `api.ts` la registra y responde 409, no 500. No conviene pasarlo a `reasons.some(...)`: convertiría en reintento la condición del SK que protege contra claves de orden repetidas |
+| Alarmas de CloudWatch | `queue-with-dlq` crea dos por cola. Si el SCP del lab niega `cloudwatch:PutMetricAlarm`, el `apply` falla en los recursos de la fase 4 |
+
+Verificado: 128 tests (5 corridas seguidas sin fallas), typecheck de functions y frontend, build del
+frontend, bundles de las funciones, `terraform fmt`/`validate`, tflint y actionlint.
