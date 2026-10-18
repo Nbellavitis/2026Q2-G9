@@ -1,7 +1,7 @@
 # Q — session handoff
 
 Everything a new session or a teammate needs to continue without re-deriving it. Written
-2026-09-07, at commit `8596d6a`.
+2026-10-17, on branch `entrega-3`, during Phase 6 of [ROADMAP.md](../ROADMAP.md).
 
 > Read [gotchas.md](gotchas.md) before deploying or deleting anything on AWS. This document is the
 > map; that one is the minefield.
@@ -17,363 +17,208 @@ line from a panel.
 **ITBA 82.08 Cloud Computing — Trabajo Práctico, Grupo 9.** Nicolás Koron · José María Benegas Lynch ·
 Agustín Galán · Nicolás Bellavitis Alzate.
 
-**Repository:** `github.com/josebl123/tp-cloud`, branch `main`. **It is public** — never commit a
-secret.
+**Repository:** `github.com/josebl123/tp-cloud`. **It is public** — never commit a secret. The work
+is on `entrega-3`, with pull request #1 (`entrega-3 → main`) open as the place the pipeline runs. It
+is not meant to be merged before the correction.
 
 ### The deliverables
 
 | Entrega | What it asks | State |
 |---|---|---|
-| **1 — Propuesta** | Pick and justify an idea | Done. Idea 1, "Queue", from `TP1-Informe-G9.pdf` |
-| **2 — Diseño y Demo de Arquitectura Fundacional** | A design document (PDF) **and** a live demo in the lab | Code and infrastructure done; **the PDF is not written** |
+| **1 — Propuesta** | Pick and justify an idea | Done. Idea 1, "Queue" |
+| **2 — Diseño y Demo de Arquitectura Fundacional** | A design document and a live demo in the lab | Done. Spring Boot on EC2 behind a load balancer, RDS, CloudFormation. Kept in [`tp2/`](../tp2/) and in git history |
+| **3 — Terraform** | Implement the architecture with Terraform, deployed from a GitHub Actions pipeline that runs on the pull request, with the TP2's corrections | In progress: Phases 1–5 deployed, Phase 6 being finished, Phase 7 pending |
 
-Entrega 2's document must contain, by name: portada; evolution of the project since Entrega 1; an
-architecture diagram using official AWS icons; a service catalogue table justifying each service
-("¿por qué este servicio y no otro?"); and design justification covering **networking** (VPC, subnet
-count, public vs private, route tables, gateways/endpoints), **compute and storage** (why EC2, EBS vs
-EFS, what S3 is for), **the database** (relational vs non-relational, argued from the data), and
-**access control** (security groups, and NACLs if used).
-
-The demo must show the app working and prove the isolation design — the canonical test being that the
-database in the private subnet is unreachable from the internet.
+The rubric and how each point is met are in [ROADMAP.md](../ROADMAP.md#cómo-se-evalúa). 40 % is that
+it deploys and works, 30 % is modules. **The cátedra has to be able to run it in their own lab
+account** with nothing but the README: no hard-coded account values, no manual steps, everything
+destroyable.
 
 ### MVP scope
 
 The proposal's five *funcionalidades*, all implemented: QR access and joining; live wait tracking;
 turn notifications; queue management by staff; leaving and the grace period. Plus Spanish/English
-throughout, and queue lanes (added later by Nicolás Koron — see §6).
+throughout, and queue lanes by party size.
 
 ---
 
 ## 2. Where things stand
 
-| Piece | State |
+| Phase | State |
 |---|---|
-| Backend API | Complete. **118 tests passing** |
-| Frontend SPA | Complete, and reviewed end to end for UX/UI/accessibility (see `frontend.md`). **No automated tests** — verified by hand against a running stack |
-| i18n (en/es) | Complete, UI and notification emails |
-| Realtime (SSE + LISTEN/NOTIFY) | Complete, verified across two instances |
-| CloudFormation | Written and validated. **Never actually deployed** |
-| Architecture diagram | `infra/q-architecture.drawio`, render-checked |
-| Documentation | `docs/` — see §9 |
-| **Entrega 2 PDF** | **Not started** |
+| 1 · Walking skeleton: Terraform and pipeline | Deployed by the pipeline, smoke test green |
+| 2 · Domain and persistence in DynamoDB | Deployed |
+| 3 · Synchronous API and Cognito | Deployed |
+| 4 · Event bus | Deployed |
+| 5 · Consumers and realtime | Deployed |
+| 6 · Retire the old system | Being finished: Java backend, compose file and SSE removed, TP2 files moved, docs rewritten |
+| 7 · Delivery | Pending: `infra/terraform/README.md`, a README per module, the updated diagram, a dry run by someone who did not write the Terraform, the PR to the cátedra's repository |
 
-Nothing here has run on real AWS. The template validates structurally; the first `create-stack` will
-likely surface something. See §8.
+[AVANCE-ENTREGA-3.md](../AVANCE-ENTREGA-3.md) is the detailed log, phase by phase: what was built,
+what was decided and why, what was verified.
+
+**The first complete deployment** (Actions run 39081506431) created 200 resources and passed the whole
+smoke test, WebSocket included. It was then destroyed from the pipeline, which also deleted the three
+buckets.
 
 ---
 
 ## 3. The stack
 
-**Backend** — Java 25 (LTS) · Spring Boot 3.5.16 · Maven · PostgreSQL 16 · Flyway · Spring Security
-with HS256 JWT via Nimbus · springdoc/OpenAPI · ZXing for QR · JUnit 5, Mockito, Testcontainers.
-
-Spring Boot 3.5 rather than 4.x deliberately: both support Java 25, and 3.5 is the mature line.
-
-**Frontend** — Next.js 16.3.3 (App Router, **static export**) · React 19.2.8 · TypeScript 5.9.3 ·
-Tailwind CSS 4.3.3. No component library, no data-fetching library, no i18n library — the API client,
-the live-resource hook, the design system and the message bundles are all first-party and small.
-
-**Infrastructure** — CloudFormation. VPC across two AZs, ALB, Auto Scaling Group on EC2, RDS
-PostgreSQL Multi-AZ, two S3 buckets, one CloudFront distribution with two origins.
+| Layer | What |
+|---|---|
+| Entry | API Gateway REST: the static site from a private S3 bucket and `/api/v1` on the same origin. API Gateway WebSocket for live updates |
+| Compute | 9 Lambdas in TypeScript on Node 22: `public`, `staff`, `stream-publisher`, `ws-connections`, `broadcaster`, `notifier`, `lifecycle`, `seed`, `cognito-pre-signup` |
+| Data | DynamoDB: `q-main` (single table, Streams, PITR, TTL) and `q-connections` |
+| Events | DynamoDB Streams → `stream-publisher` → SNS FIFO → SQS (`push` FIFO, `notifications` filtered, `lifecycle` delayed), each with a DLQ and alarms |
+| Identity | Cognito user pool for staff; customers are anonymous, authorised by their ticket token |
+| Email | SES, sandboxed in the lab |
+| Infrastructure | Terraform 1.16, AWS provider 6.67, one external module (`terraform-aws-modules/dynamodb-table` 5.5.2) and three of our own (`private-bucket`, `lambda-function`, `queue-with-dlq`) |
+| Pipeline | GitHub Actions on the pull request: validate, build, plan; apply after approving `aws-lab`; destroy with the `destroy` label |
+| Frontend | Next.js 16 static export, React 19, Tailwind 4 |
 
 ---
 
 ## 4. Repository map
 
 ```
-backend/           Spring Boot API
-  Dockerfile         multi-stage; JRE runtime, non-root, layered jar
-  .env.example       copy to .env — properties syntax, gitignored
-  src/main/java/ar/edu/itba/cloud/queue/
-    persistence/     entities + Spring Data repositories (only layer that knows the database)
-    service/         every business rule; the only layer that touches entities
-      command/         inputs to the service layer
-      model/           read models returned by it
-      notification/    NotificationSender seam + dispatcher
-    controller/      HTTP only; request DTOs; never imports an entity
-    realtime/        SseHub, RealtimeBus, BroadcastCoordinator, Postgres listener, SseMetrics
-    security/        JWT issuing, @CurrentUser, RFC 7807 problem handlers
-    config/          AppProperties, SecurityConfig, RealtimeConfig, InstanceIdentity
-  src/main/resources/
-    db/migration/    V1__init, V2__entry_locale, V3__queue_lanes
-    i18n/            notifications.properties (+ _es)
-frontend/          Next.js SPA, exported to out/
-  src/app/           routes; src/components/ design system; src/lib/ api, auth, i18n, hooks
-infra/             q-stack.yaml, q-architecture.drawio, README.md (runbook)
-docs/              architecture, domain-model, api-reference, frontend, gotchas, HANDOFF
-.agents/plans/     hybrid-lane-eta/PLAN.md — a teammate's working plan
-docker-compose.yml PostgreSQL (host port 55432) + Mailpit
+functions/          the Lambdas: src/handlers (one per function), domain, persistence, api; test/
+infra/terraform/    the deployment: *.tf at the root, modules/, scripts/buckets.sh, seed/demo.json
+frontend/           the site
+.github/            workflows/terraform.yml, actions/terraform-init, scripts/smoke-realtime.mjs
+docs/               this file and the rest of the documentation
+tp2/                the TP2 delivery, as delivered
+ROADMAP.md          the plan for the Tercera Entrega (Spanish)
+AVANCE-ENTREGA-3.md the log of what was done (Spanish)
+arquitectura-serverless.md  the serverless design (Spanish)
 ```
-
-**Layering is strict and enforced by convention:** JPA entities never leave the service layer;
-the service layer never sees an HTTP type. Requests become `service.command` records; responses are
-the immutable read models in `service.model`, reused directly as JSON rather than mapped twice.
 
 ---
 
 ## 5. How to run everything
 
-### Local development
+**Deploy** — see [deployment.md](deployment.md). In short: lab credentials into the three secrets,
+push to `entrega-3`, approve the apply, read the URLs in the run summary.
+
+**Tests:**
 
 ```bash
-docker compose up -d
-cd backend && mvn spring-boot:run -Dspring-boot.run.profiles=dev
-cd frontend && npm run dev
+cd functions && npm install && npm test
 ```
 
-App <http://localhost:3000> · API <http://localhost:8080> · Swagger `/swagger-ui.html` ·
-Mailpit <http://localhost:8025>. Sign in `owner@demo.q` / `demo1234` (staff: `staff@demo.q`).
+128 tests, with Docker running (DynamoDB Local through Testcontainers). `npm run typecheck` and
+`npm run build` too; the build writes one bundle per handler to `functions/dist/`.
 
-**PostgreSQL is on 55432, not 5432** — this machine has its own PostgreSQL on 5432 which silently
-answers instead, producing a confusing `role "q" does not exist`.
-
-The `dev` seeder is idempotent; for fresh demo data, truncate first:
+**Frontend:**
 
 ```bash
-docker exec q-postgres psql -U q -d qdb -c "TRUNCATE TABLE notification_record, queue_event, queue_entry, queue_lane, service_queue, membership, establishment, user_account RESTART IDENTITY CASCADE;"
+cd frontend && npm install && npm run typecheck && npm run lint && npm run build
 ```
 
-### Tests
+`npm run dev` needs a deployed stack: set `DEV_API_URL` in `frontend/.env.local` to the site's URL
+(see `.env.example`) and the dev server proxies the API and `config.json` to it.
+
+**Terraform locally**, for `fmt` and `validate` only (deploying is the pipeline's job):
 
 ```bash
-cd backend && mvn test          # 118 tests; Docker must be running
+cd infra/terraform && terraform fmt -check -recursive && terraform init -backend=false && terraform validate
 ```
-
-Integration tests use Testcontainers against a real PostgreSQL — the pessimistic locks, CHECK
-constraints and Flyway migrations are exactly what an in-memory database would fake. If Docker
-Desktop has quit you get ~57 context-load errors that look like a code break; `open -a Docker`.
-
-### Container
-
-```bash
-cd backend && docker build -t queue-api:1 .
-```
-
-Tests are skipped inside the build (Testcontainers needs a daemon the build lacks).
-
-### Frontend for deployment
-
-```bash
-cd frontend && NEXT_PUBLIC_API_URL= npm run build
-```
-
-**The empty value is required.** It makes API calls relative, so they hit the same CloudFront origin
-that served the page — which is what removes CORS and mixed content. Verify with
-`grep -r localhost:8080 frontend/out/` finding nothing.
 
 ---
 
 ## 6. The architecture, in brief
 
-Full reasoning in [architecture.md](architecture.md); this is the shape.
+[architecture.md](architecture.md) is the full version. The four ideas that hold it together:
 
-### Data and correctness
-
-- **Positions are never stored.** An entry carries a sparse `order_key` (gap 1000); position is its
-  index in the `WAITING` list. A stored position could disagree with the line; a derived one cannot.
-- **One pessimistic lock per queue row** (`SELECT … FOR UPDATE`) serialises every mutation. That
-  single lock is what stops two staff calling the same person and two joins taking the same ticket
-  number.
-- **Reads ask before they lock** (added later): public reads check whether anything is due to expire
-  over an index, and take the lock only if so.
-- **Grace expiry runs lazily on read *and* on a background sweep** — so state is never stale on read,
-  and a queue nobody is watching still moves.
-- **Four no-show policies**: keep position, move back N, move to end, remove. `gracePeriodSeconds = 0`
-  means the clock never decides.
-
-### Lanes (added by Nicolás Koron)
-
-One queue, one QR, but segmented into party-size bands with their own priority, capacity mode
-(`PERSONS`/`GROUPS`), `timeFactor` and active flag. `QueueEntrySelector` chooses the next group under
-one of three strategies — `GLOBAL_AGE`, `LANE_PRIORITY`, `ROUND_ROBIN` — and **both the real call and
-the ETA simulation go through it**, so the quoted wait comes from the rules that will actually serve
-you. The round robin rotates over *all* active lanes, because the cursor is a persisted index and
-rotating only over occupied lanes starves the lane it exists to protect. `DELETE /queues/{id}`
-archives rather than destroys.
-
-### Realtime
-
-SSE, not WebSocket: traffic is unidirectional, it is plain HTTP, and it reconnects itself. Two
-streams, both keyed by queue — the staff board and each customer's ticket.
-
-**Across instances**, changes travel through **PostgreSQL LISTEN/NOTIFY**. Each instance holds one
-dedicated connection issuing `LISTEN queue_changed`; a change publishes `pg_notify` *inside its own
-transaction*, so PostgreSQL withholds it until commit and discards it on rollback. Chosen over
-ElastiCache Redis, which offers identical at-most-once semantics for real money and an extra failure
-domain. Behind a `RealtimeBus` interface: `POSTGRES` everywhere deployed, `LOCAL` (in-JVM) in tests.
-
-**`BroadcastCoordinator`** keeps the work off the listener thread — that thread only decodes and
-hands off, because doing the refresh there serialised every queue behind every other and let one
-slow client block them all. Refreshes run on virtual threads, at most one per queue in flight, behind
-a 200 ms coalescing window. There is deliberately **no revision counter**: per-queue serialisation
-already makes an older view unable to follow a newer one.
-
-### Security
-
-Two authorisation models. **Customers are anonymous**, authorised by an unguessable ticket token in
-the URL — a capability, not an account, because "datos mínimos" is a requirement. **Staff** hold a
-12-hour HS256 JWT; authorisation is *membership*, not a role claim in the token, so revoking access
-takes effect on the next request. Errors are RFC 7807 with a stable machine-readable `code`.
-
-### Frontend
-
-Static export: `next build` writes `out/`, no Next server in production. The two customer URLs
-(`/q/{queueId}`, `/t/{ticketToken}`) are printed on posters and sent in messages, so they keep clean
-paths — each is a single shell page reading its id from the address bar, with a CloudFront Function
-rewriting the path. Staff URLs use query strings and need no hosting configuration.
-
-i18n is first-party: English is the source of truth, `MessageKey` derives from it, and Spanish is
-typed as a complete record — **a missing translation is a build error**. The customer's locale is
-stored on their entry so the email an hour later matches the page they joined from.
+* **Every change to a queue is one DynamoDB transaction conditioned on the queue's version.** No
+  locks; the loser re-reads and decides again.
+* **Events are items in that same transaction.** The stream publishes them, so nothing is announced
+  that did not commit, and everything asynchronous — pushes, notifications, the grace timer, releasing
+  a closed queue — is a consumer of those events.
+* **Consumers re-read state instead of trusting events.** Duplicates and reordering cost at most an
+  extra push, never a wrong screen or a second email.
+* **The lab's limits shaped the deployment.** No IAM roles (everything uses `LabRole`), no
+  CloudFront (API Gateway serves the site), and an SCP that keeps Terraform from creating S3 buckets
+  (the pipeline creates them).
 
 ---
 
 ## 7. Measurements actually taken
 
-Not estimates — these were measured on this machine and are safe to quote in the document.
-
-| What | Result |
-|---|---|
-| Broadcast fan-out, before | `≈ 14 + 4 × watchers` SQL statements per queue movement |
-| Broadcast fan-out, after | **Flat ~19–20**, independent of watchers. At 12 watchers: 66 → 19 |
-| Cross-instance realtime | Two instances, one DB: customer streaming from A received a change made on B (3 SSE frames). With transport forced to `LOCAL`, the same update was **provably lost** (1 frame) |
-| Graceful shutdown | Released 2 live SSE connections, then completed in **6 ms** — not the 25 s budget |
-| `prod` profile with no config | **Exits non-zero**, naming the unresolved placeholder |
-| i18n end to end | Three customers in one queue each received their own language, verified in Mailpit |
-
-**Throughput reasoning:** ~20 statements per queue movement. A busy restaurant (40 waiting, a call
-every two minutes) is **~1.5 queries/second**. Reaching 450/s would need ~3,000 people waiting across
-100 active queues. The database is not the bottleneck — **open SSE connections on the app tier are**,
-which is why `q.sse.connections` is exported as a metric.
+| What | Result | Where |
+|---|---|---|
+| First complete deployment | 200 resources, smoke test green including the WebSocket | Actions run 39081506431 |
+| Teardown | 200 resources destroyed, then the three buckets emptied and deleted | Actions run 39083049121 |
+| S3 reads the lab's SCP denies | 1 of 16: `GetBucketObjectLockConfiguration` | CloudShell probe, AVANCE |
+| Release batch for a closed queue | 24 entries (4 items each + the queue fit in a 100-item transaction; 30 did not) | Phase 2 |
+| Test suite | 128 tests, 5 clean runs in a row; one race test failed once in ~29 runs | Phase 1–5 review |
+| A documentation-only push | Plans ~75 site objects to change and replaces the WebSocket deployment | After the first deployment |
 
 ---
 
-## 8. AWS deployment
+## 8. Working conventions
 
-Runbook in [../infra/README.md](../infra/README.md). Summary:
-
-**Target:** AWS Academy Learner Lab, `us-east-1`, ~$50 budget. The template creates **no IAM roles** —
-it reuses `LabInstanceProfile`, because that environment forbids creating them.
-
-**Shape:** VPC `10.0.0.0/16`, six subnets (three tiers × two AZs). Public holds the ALB and NAT
-Gateway; private-app holds the ASG; private-DB holds RDS and **its route table has no `0.0.0.0/0`
-entry at all**. One CloudFront distribution fronts the SPA from S3 and `/api/*` from the ALB, making
-the whole product one HTTPS origin — no domain, no ACM, no CORS. An S3 Gateway Endpoint keeps artifact
-downloads off the NAT.
-
-**Cost ~$0.18/hour.** A 4-hour session is $0.70; two weeks running is $59 — more than the budget.
-`delete-stack` between sessions, and **empty both buckets first** or the delete fails partway with the
-NAT Gateway still billing.
-
-**Services used:** VPC, subnets, route tables, IGW, NAT GW, S3 Gateway Endpoint, Security Groups,
-NACLs, EC2, EBS, ALB, ASG, RDS, S3, CloudFront. **Deliberately not used:** SSM and CloudWatch (not yet
-covered in class), Lambda, EFS, DynamoDB, read replicas.
-
-**The three answers most likely to be asked:**
-
-- *Why EC2 and not Lambda?* The app holds open SSE connections and a long-lived PostgreSQL `LISTEN`
-  connection. Both need a process that stays alive; Lambda caps at 15 minutes and cannot hold a
-  stream. The architecture *requires* persistent compute.
-- *Why RDS and not DynamoDB?* Ordering is the product (position is a sorted range query); correctness
-  depends on row locks; metrics are aggregations; and the database is also the message bus via
-  LISTEN/NOTIFY. DynamoDB provides none of those four.
-- *EBS or EFS?* EBS root volumes only. The instances share no files — QR codes are generated in
-  memory, there are no uploads. Shared state lives in RDS, which is the point.
-
----
-
-## 9. Documentation map
-
-| File | Contents |
-|---|---|
-| [architecture.md](architecture.md) | The main design document. Request lifecycles, concurrency, ordering, lanes, realtime, security, deployment, and a **23-entry decision log** naming rejected alternatives |
-| [domain-model.md](domain-model.md) | Entities, entry state machine, grace policies, lanes, estimation, metrics |
-| [api-reference.md](api-reference.md) | Every endpoint, error code, the SSE contract, lane endpoints |
-| [frontend.md](frontend.md) | Frontend implementation and design language |
-| [gotchas.md](gotchas.md) | **Traps.** Teardown, cost, local setup, and code that looks wrong but isn't |
-| [../infra/README.md](../infra/README.md) | Deployment runbook and demo script |
-
----
-
-## 10. Working conventions
-
-**Commit attribution.** Commits in this repository are Jose's alone — **never add a
-`Co-Authored-By` trailer or any AI attribution**. This has been stated repeatedly and is recorded in
-the project memory. Verify before pushing:
+**Commit attribution.** Jose's commits carry **no `Co-Authored-By` trailer and no AI attribution**.
+Four earlier commits by Nicolás Koron on `entrega-3` do carry one; they were left as they are, on
+purpose. Before pushing, check that the new commits have none:
 
 ```bash
-git log origin/main --format='%B%n%(trailers)' | grep -icE "claude|anthropic|co-authored"   # must be 0
+git log origin/entrega-3..HEAD --format='%B' | grep -icE "claude|anthropic|co-authored"   # must be 0
 ```
 
 **Pushing.** Port 22 is blocked from the agent shell on this machine. Use:
 
 ```bash
-git -c url."ssh://git@ssh.github.com:443/".insteadOf="git@github.com:" push origin main
+git -c url."ssh://git@ssh.github.com:443/".insteadOf="git@github.com:" push origin entrega-3
 ```
 
-If the agent has no identities: `ssh-add --apple-load-keychain`.
+**Don't push while the lab is up and nobody can approve.** Every push to the PR queues an apply; an
+unapproved one blocks the next destroy ([gotchas.md](gotchas.md) §2).
+
+**Language.** Code comments, commit messages, ROADMAP and AVANCE are in Spanish; the documents in
+`docs/` and the README are in English.
 
 **Commit style.** Prose explaining *why*, not bullet lists of what. Include measurements where they
 exist. Look at recent history for the register.
 
 **`.claude/` is gitignored** deliberately, so AI tooling config stays out of the repository.
 
-**Tooling notes:** no AWS CLI installed locally (the Learner Lab console and CloudShell are the path);
-`pip install` into system Python is blocked by PEP 668 — use a venv in the scratchpad.
+**Tooling notes:** no AWS CLI installed locally — the lab console and CloudShell are the way in, and
+the pipeline does everything else. Terraform and Docker are installed.
 
 ---
 
-## 11. Open items
+## 9. Open items
 
-**Blocking Entrega 2:**
+**Phase 6, the user's part** (needs the lab up): delete what is left of the TP2 in the lab account
+(the stack, RDS, the load balancer, the Auto Scaling Group, the NAT Gateway), delete `app.env` from
+the TP2's artifacts bucket, **revoke the Gmail app password** that was in it, and rotate the RDS
+password if the database is kept.
 
-1. **Write the PDF.** Most content exists across `architecture.md` and `infra/README.md`; the work is
-   restructuring it into the exact headings the assignment names (§1) and exporting the diagram.
-2. **Nobody has deployed the stack.** Budget the first `create-stack` generously — most likely
-   failures are `AmiId` (region-specific, rotates) and `DbEngineVersion` (defaults to `16.4`, may not
-   be offered).
+**Phase 7** — see the ROADMAP.
 
-**Known inconsistencies:**
+**To look at, not fixed:**
 
-3. **The infrastructure and the application disagree about packaging.** `infra/q-stack.yaml`
-   user-data downloads a jar and runs it under systemd; the backend now ships a container started by
-   `backend/queue-container.service`. Pick one before deploying.
-4. **`docs/domain-model.md`'s lanes section is in Spanish** while the rest of that document is
-   English. Harmless, but inconsistent.
-5. **`GlobalExceptionHandler` has no `DataIntegrityViolationException` handler**, so any constraint
-   violation surfaces as a 500 rather than a 409. The two that were reachable through the interface
-   — deleting a used lane, and a duplicate lane name — are now guarded in `QueueLaneService`, but the
-   class of problem is still open.
-6. **`NEXT_PUBLIC_SHOW_DEMO_LOGIN` is unset**, so the sign-in page ships working owner and staff
-   credentials with one-click fill. That is deliberate for the live demo. Build with it set to
-   `false` for any public deployment — this repository is public.
-
-**Deliberate deferrals** (decided, not forgotten):
-
-7. `BackupRetentionPeriod: 0` and `DeletionProtection: false` — correct for a stack rebuilt every
-   session, wrong for anything real. One line each.
-8. **CloudWatch** — not yet covered in class. Consequence: with no SSH into the private subnets, a
-   failed deployment is opaque. The escape hatch is three lines of user-data copying
-   `/var/log/q-bootstrap.log` to the artifacts bucket.
-9. **No frontend test suite.** Playwright against the real stack is the obvious next step. The
-   frontend review was done by hand, so nothing guards the fixes from regressing.
-10. **Nothing reads the lane history that soft delete preserves.** A retired lane keeps which band
-   each finished customer was served in, and its `time_factor`; no metric queries it yet. A per-lane
-   metrics query needs its own explicitly-named repository finder, since every existing lane finder
-   filters deleted rows out on purpose.
-11. `GraceSweepJob` runs on every instance — correct because of the per-queue lock, but duplicated
-   work.
+1. **The flaky race test** ("tres a la vez" in `races.test.ts`, once in ~29 runs). Not the optimistic
+   lock. If it fails in the pipeline, the cancellation reasons are in the error message.
+2. **Every build changes the site.** The Next.js build ID is random; pinning it (`generateBuildId`)
+   would make a plan with no frontend changes leave the site alone. The WebSocket deployment is
+   replaced on every plan too.
+3. **`reasons[0]` in `commit`** only recognises a version conflict at position 0. Correct today, and
+   widening it would break the order-key protection ([gotchas.md](gotchas.md) §6).
+4. **No frontend test suite.** Playwright against a deployed stack is the obvious next step.
+5. **Nothing reads the lane history that retiring preserves.** A retired lane keeps which band each
+   finished customer was served in; no metric uses it yet.
 
 ---
 
-## 12. If you are picking this up cold
+## 10. If you are picking this up cold
 
-Read, in order: this file → [gotchas.md](gotchas.md) → [architecture.md](architecture.md) §§1–2 for
-the shape, then whichever section covers what you are touching. `git log` messages carry the
-reasoning for anything recent.
+Read, in order: this file → [gotchas.md](gotchas.md) → [architecture.md](architecture.md) §§1–3 for
+the shape, then whichever section covers what you are touching. `git log` messages and AVANCE carry
+the reasoning for anything recent.
 
 The single most useful thing to know: **almost every non-obvious choice here was measured or argued,
 and the argument is written down.** Before changing something that looks odd, check the decision log
-in `architecture.md` and the "code that looks wrong but isn't" table in `gotchas.md` — the reason is
-probably already there.
+in `architecture.md`, the "Ajustes al diseño" table in the ROADMAP, and the "code that looks wrong but
+isn't" table in `gotchas.md` — the reason is probably already there.

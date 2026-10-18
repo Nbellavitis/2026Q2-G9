@@ -7,23 +7,34 @@ phone instead of standing in it. Staff run the line from a panel.
 ITBA 82.08 Cloud Computing - TP, Grupo 9. This repository implements the MVP of *Funcionalidades 1-5*
 of the "Queue" proposal.
 
-**Status: backend and frontend both complete.** The SPA talks to the API over REST and Server-Sent Events.
+**Status: serverless, deployed by Terraform from GitHub Actions** (Tercera Entrega). The static site
+and the REST API share one API Gateway; the functions are TypeScript Lambdas over DynamoDB, with
+Cognito for staff accounts, SNS/SQS for everything asynchronous, and a WebSocket API for live
+updates. The previous delivery (Spring Boot on EC2 behind a load balancer, with RDS) is kept in
+[`tp2/`](tp2/) and in git history. [`ROADMAP.md`](ROADMAP.md) has the plan and the corrections from
+the TP2; [`AVANCE-ENTREGA-3.md`](AVANCE-ENTREGA-3.md) has where each phase stands.
 
 ## MVP coverage
 
 | Proposal | Where it lives |
 |---|---|
 | **1. Acceso e ingreso mediante QR** | `GET /public/queues/{id}/qr` renders the code; `POST /public/queues/{id}/entries` joins with a name plus one contact channel. |
-| **2. Seguimiento de la espera** | `GET /public/tickets/{token}` and its SSE stream: position, people ahead, estimated wait, recomputed on every movement. |
-| **3. Notificaciones del turno** | Configurable proximity thresholds (by position and by minutes), the "it's your turn" alert, and an audited notification history. |
-| **4. Gestion de la fila por el comercio** | Staff board, call / serve / no-show / cancel, pause and resume, and queue + establishment metrics. |
+| **2. Seguimiento de la espera** | `GET /public/tickets/{token}`, then pushed over the WebSocket: position, people ahead, estimated wait, recomputed on every movement. |
+| **3. Notificaciones del turno** | Configurable proximity thresholds (by position and by minutes), the "it's your turn" alert, and an audited notification history, sent by email through SES. |
+| **4. Gestion de la fila por el comercio** | Staff board, call / serve / no-show / cancel, pause and resume, lanes by party size, and queue + establishment metrics. |
 | **5. Abandono y periodo de gracia** | `DELETE /public/tickets/{token}` frees the place; a configurable grace period plus four no-show policies decide what happens to someone who does not show up. |
 | **Idiomas** | English and Spanish, following the browser. The locale is stored with the entry, so notification emails arrive in the same language as the page the customer joined from. |
 
 ## Stack
 
-**Backend** — Java 25 (LTS) · Spring Boot 3.5 · Spring Security (JWT) · Spring Data JPA ·
-PostgreSQL 16 · Flyway · springdoc/OpenAPI · Testcontainers.
+**Functions** — TypeScript on Node 22, one bundle per Lambda built with esbuild, AWS SDK v3,
+Vitest with Testcontainers (DynamoDB Local).
+
+**AWS** — API Gateway (REST for the site and the API, WebSocket for live updates), Lambda, DynamoDB
+(single table plus a connections table, Streams), Cognito, SNS FIFO, SQS, SES, S3, CloudWatch.
+
+**Infrastructure** — Terraform, run only from GitHub Actions: plan on every push to the pull
+request, apply after an approval, destroy with a label.
 
 **Frontend** — Next.js 16 (App Router, static export) · React 19 · TypeScript · Tailwind CSS 4.
 No component library and no data-fetching library: the API client, the live-resource hook and the
@@ -32,211 +43,105 @@ design system are all first-party and small.
 ## Layout
 
 ```
-backend/          Spring Boot REST API
-  src/main/java/ar/edu/itba/cloud/queue/
-    persistence/  entities + repositories   - the only layer that knows about the database
-    service/      business rules            - the only layer that touches entities
-    controller/   HTTP                      - translates requests into service calls
-    security/     JWT issuing and resolution
-    realtime/     Server-Sent Events fan-out
-    config/       properties, security, OpenAPI, clock
-    exception/    RFC 7807 problem responses
-frontend/         Next.js SPA, exported as static files
-  src/app/        routes (see below)
-  src/components/ design-system primitives
-  src/lib/        API client, auth, live-resource hook, formatters
-docs/             architecture, domain model, API reference, frontend notes
-docker-compose.yml  PostgreSQL + Mailpit for local development
+functions/            the Lambdas
+  src/handlers/       one file per function - each is its own bundle
+  src/domain/         the queue rules: no AWS in here
+  src/persistence/    DynamoDB: keys, items, optimistic writes
+  src/api/            request parsing and response views
+  test/               unit tests, and integration tests against DynamoDB Local
+infra/terraform/      the whole deployment: modules/, scripts/buckets.sh, seed/
+frontend/             Next.js SPA, exported as static files
+  src/app/            routes (see below)
+  src/components/     design-system primitives
+  src/lib/            API client, Cognito, live-resource hook, formatters
+.github/workflows/    the pipeline: validate, build, plan, apply, destroy
+docs/                 architecture, domain model, API reference, deployment, frontend notes
+tp2/                  the TP2 delivery as it was: CloudFormation template, diagram, runbook
 ```
 
 ### Routes
 
 | Route | Who | What |
 |---|---|---|
-| `/q/{queueId}` | customer | What the QR opens: the queue's live state, then the join form. |
-| `/t/{ticketToken}` | customer | Their own place in line, pushed live. |
-| `/` `/login` `/register` | staff | Landing and sign-in. |
-| `/panel` | staff | Today's numbers and every queue at a glance. |
-| `/panel/queue?id=` | staff | The live board: call, serve, no-show, pause, close. |
-| `/panel/queue/settings?id=` | owner | Waits, grace period, no-show policy, notification thresholds. |
-| `/panel/queue/qr?id=` | staff | The QR sheet, laid out for printing. |
+| `/q/?id={queueId}` | customer | What the QR opens: the queue's live state, then the join form. |
+| `/t/?token={ticketToken}` | customer | Their own place in line, pushed live. |
+| `/` `/login/` `/register/` | staff | Landing, sign-in and sign-up. |
+| `/panel/` | staff | Today's numbers and every queue at a glance. |
+| `/panel/queue/?id=` | staff | The live board: call, serve, no-show, pause, close. |
+| `/panel/queue/settings/?id=` | owner | Waits, grace period, no-show policy, notification thresholds, lanes. |
+| `/panel/queue/qr/?id=` | staff | The QR sheet, laid out for printing. |
 
-The two customer URLs stay clean because they get printed on a poster and sent in a message.
-Staff URLs carry their ids in the query string, which keeps the hosting configuration to two rules
-(see Deploying below).
+Every id travels in the query string: a static export cannot pre-render unknown ids, and the site is
+served from S3 through API Gateway with no rewrite rules. Deployed, every path starts with the stage,
+`/prod`.
 
-The layering is strict in both directions: JPA entities never leave the service layer, and the
-service layer never sees an HTTP type. Requests are mapped into `service.command` records;
-responses are the immutable read models in `service.model`.
+## Deploying it
 
-## Running it
+Everything is deployed by [the pipeline](.github/workflows/terraform.yml) on the pull request, into
+an AWS Academy Learner Lab account. In short: load the lab's credentials into the repository secrets,
+push, approve the `aws-lab` environment, read the URL in the run summary. Destroy by adding the
+`destroy` label. The full procedure is in [docs/deployment.md](docs/deployment.md).
 
-```bash
-docker compose up -d
-```
+## Running the frontend locally
 
-```bash
-cd backend && mvn spring-boot:run -Dspring-boot.run.profiles=dev
-```
+There is no local API: `npm run dev` runs the site against the one deployed in the lab, through a
+proxy in `next.config.ts` (the deployed API serves the site from its own origin, so it has no CORS).
 
 ```bash
-cd frontend && npm install && npm run dev
+cd frontend && npm install && cp .env.example .env.local
 ```
 
-* App - <http://localhost:3000>
-* API - <http://localhost:8080/api/v1>
-* Swagger UI - <http://localhost:8080/swagger-ui.html>
-* Mailpit (catches every notification email) - <http://localhost:8025>
-
-> PostgreSQL is published on **55432**, not 5432, so it does not collide with a locally installed
-> PostgreSQL. Change it in `docker-compose.yml` and `DB_URL` if you prefer.
-
-The `dev` profile seeds a demo establishment with two queues and three customers waiting:
-
-| Account | Password | Role |
-|---|---|---|
-| `owner@demo.q` | `demo1234` | OWNER |
-| `staff@demo.q` | `demo1234` | STAFF |
-
-### Try it end to end
+Set `DEV_API_URL` in `.env.local` to the deployed site's URL - "Sitio" in the summary of the last
+apply run, or `terraform output -raw site_url` - and start it:
 
 ```bash
-TOKEN=$(curl -s -X POST localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' -d '{"email":"owner@demo.q","password":"demo1234"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["accessToken"])')
+cd frontend && npm run dev
 ```
 
-```bash
-curl -s localhost:8080/api/v1/establishments -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
-```
+The demo data includes a staff user, `demo@queue.example`. Its password is random and changes with
+every deployment: `terraform output -raw demo_staff_password`, or register a new account.
 
 ## Tests
 
 ```bash
-cd backend && mvn test
+cd functions && npm install && npm test
 ```
 
-118 tests: unit tests for the estimation and ordering logic, plus integration tests that run the
-whole API against a real PostgreSQL through Testcontainers (Docker must be running). The tests drive
-a controllable clock, so grace periods and token expiry are asserted directly rather than by
-sleeping.
-
-## Running it in a container
-
-```bash
-cd backend && docker build -t queue-api:1 .
-```
-
-A multi-stage build: the JDK, Maven and the sources stay in the build stage, and the runtime image is a
-JRE with the jar extracted into layers, running as a non-root user. Tests are skipped inside the build
-because Testcontainers needs a Docker daemon the build does not have - run `mvn test` outside it.
-
-```bash
-docker run --rm -p 8080:8080 --network tp-cloud_default \
-  -e DB_URL=jdbc:postgresql://postgres:5432/qdb -e DB_USER=q -e DB_PASSWORD=q \
-  -e JWT_SECRET=... queue-api:1
-```
-
-`.dockerignore` keeps `.env` out of the image: configuration is passed in at run time, so the same
-image is what runs locally and on an instance.
-
-On EC2 the container is started by systemd - `backend/queue-container.service`, which also documents
-moving the image with `docker save` / `docker load` instead of publishing it to a registry.
-
-## Configuration
-
-Everything is overridable by environment variable; defaults suit local development.
-
-Values also come from a **`.env`** file, read natively through `spring.config.import` - no library and
-no `export`. Copy `backend/.env.example` to `backend/.env` and fill it in; the file is gitignored, and
-`/etc/queue/queue.env` is read the same way on a deployed instance. It is properties syntax, not shell:
-no `export`, no quotes. Both imports are optional, so tests and CI still run on the defaults below.
-
-| Property | Env | Default | Purpose |
-|---|---|---|---|
-| `q.public-base-url` | `PUBLIC_BASE_URL` | `http://localhost:3000` | SPA base. QR codes and ticket links are built on it. |
-| `q.cors-allowed-origins` | `CORS_ORIGINS` | `http://localhost:3000` | |
-| `q.jwt.secret` | `JWT_SECRET` | dev value | **Must be overridden outside local dev.** Minimum 32 bytes. |
-| `spring.mail.*` | `MAIL_HOST` `MAIL_PORT` `MAIL_USERNAME` `MAIL_PASSWORD` `MAIL_AUTH` `MAIL_STARTTLS` | Mailpit on `localhost:1025`, no auth | A real provider needs all six. Gmail: `smtp.gmail.com`, `587`, auth and STARTTLS on, and a 16-character App Password rather than the account password. Email is the only channel a customer can be reached on. |
-| `q.jwt.ttl` | | `12h` | Access-token lifetime. |
-| `q.estimation.service-time-samples` | | `10` | Recent services averaged into the ETA. |
-| `q.grace.sweep-interval` | | `10s` | How often expired grace periods are swept. |
-| `q.sse.timeout` / `q.sse.heartbeat-interval` | `SSE_TIMEOUT` `SSE_HEARTBEAT` | `5m` / `20s` | Streams are short on purpose: one sticks to the instance that accepted it, so a long-lived stream keeps load unbalanced after a scale-out. The heartbeat must stay under the shortest idle timeout in front of it — CloudFront's origin response timeout is 30s. |
-| `q.notifications.email.enabled` | `NOTIFY_EMAIL_ENABLED` | `false` (`true` in `dev`) | When off, notifications go to the logging transport. |
-| `spring.datasource.url` | `DB_URL` | `jdbc:postgresql://localhost:55432/qdb` | |
-
-### Running the `prod` profile
-
-`--spring.profiles.active=prod` makes the settings below **mandatory** — it will not start without
-them, on purpose.
-
-| Variable | Purpose |
-|---|---|
-| `DB_URL`, `DB_USER`, `DB_PASSWORD` | RDS endpoint and credentials |
-| `JWT_SECRET` | At least 32 bytes, and **identical on every instance** or tokens issued by one are rejected by another |
-| `PUBLIC_BASE_URL` | The CloudFront domain. QR codes and ticket links are built on it, so it must be an address a customer's phone can reach — never an internal load balancer name |
-| `INSTANCE_ID` | Written into every log line and returned as `X-Instance-Id`. Set from EC2 instance metadata at boot |
-| `NOTIFY_EMAIL_ENABLED` | `false` by default; notifications fall back to the logging transport |
-
-Health endpoints for a load balancer target group: **`/actuator/health/readiness`** (includes the
-database) and `/actuator/health/liveness` (process only).
+128 tests: unit tests for the domain rules (ordering, estimation, lanes, the selector, metrics) and
+integration tests that run the handlers, the stores, the stream consumers and the races against a
+real DynamoDB Local through Testcontainers, so **Docker must be running**. `npm run test:unit` runs
+only the first group. The pipeline runs all of them on every push, and after every apply a smoke test
+joins the demo queue and checks that the WebSocket push arrives.
 
 ## Design notes worth knowing
 
-* **Positions are derived, never stored.** The `WAITING` list sorted by a sparse order key *is* the
-  line, so a shown position can never disagree with reality.
-* **One lock per queue.** Every mutation takes a pessimistic write lock on the queue row, which is
-  what stops two staff members from calling the same person.
-* **Notifications are sent after commit** and de-duplicated by `(entry, type, pass through the
-  line)`, so a threshold alert fires once per pass however much the queue moves.
-* **Grace expiry is evaluated both lazily and by a background sweep**, so state is never stale on
-  read and a queue nobody is watching still moves.
-* **One clock.** Time is read through an injected `Clock` everywhere, including JWT validation.
+* **Positions are derived, never stored.** The waiting list sorted by its fractional string order key
+  *is* the line, so a shown position can never disagree with reality, and the line never needs
+  renumbering.
+* **One version per queue.** Every change is a single DynamoDB transaction conditioned on the
+  queue's `META.version`; the loser re-reads and decides again. That is what stops two staff
+  members from calling the same person.
+* **Events are written with the change.** Each operation's events are items in the same
+  transaction, so an event exists if and only if the change committed. A stream function publishes
+  them to SNS, and pushes, notifications and timers all start from there.
+* **Notifications are decided from state, not from events**, and claimed with a conditional write
+  per `(entry, type, pass through the line)`, so a threshold alert fires once per pass however much
+  the queue moves, and duplicates or late events change nothing.
+* **Grace expiry is evaluated on a timer and on every read and write**, so state is never stale on
+  read and a queue nobody is watching still moves. The first one to apply it wins.
+* **No secrets anywhere.** Cognito replaced the hand-rolled JWT, and DynamoDB, SES, SNS and SQS are
+  reached with the lab's IAM role.
 
 ## Documentation
 
 | Document | Covers |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | **Start here.** System architecture, request lifecycles, the concurrency and ordering models, security, cloud deployment, and a decision log with the alternatives that were rejected |
-| [docs/domain-model.md](docs/domain-model.md) | Entities, the entry state machine, grace policies, estimation and metrics definitions |
-| [docs/api-reference.md](docs/api-reference.md) | Every endpoint, error code and payload, plus the SSE contract |
+| [docs/architecture.md](docs/architecture.md) | **Start here.** The components, request lifecycles, data model, concurrency, events, security, and the decision log |
+| [docs/domain-model.md](docs/domain-model.md) | Entities and their DynamoDB items, the entry state machine, lanes, grace policies, estimation, notifications and metrics |
+| [docs/api-reference.md](docs/api-reference.md) | Every endpoint, error code and payload, plus the WebSocket contract |
+| [docs/deployment.md](docs/deployment.md) | The pipeline: credentials, plan, approval, apply, smoke test, destroy |
 | [docs/frontend.md](docs/frontend.md) | Frontend implementation notes and the design language |
-| [docs/HANDOFF.md](docs/HANDOFF.md) | **Session handoff.** Where everything stands, how to run it, the measurements taken, conventions, and the open items. Read this first if you are picking the project up |
-| [docs/gotchas.md](docs/gotchas.md) | **Read before deploying or deleting anything.** Teardown traps, cost, local setup, and the decisions a cleanup would break |
-| [infra/README.md](infra/README.md) | Deployment runbook for AWS, and the demonstration script |
-| [infra/q-stack.yaml](infra/q-stack.yaml) | CloudFormation template — the whole environment, 50 resources |
-| [infra/q-architecture.drawio](infra/q-architecture.drawio) | Architecture diagram, editable in draw.io, official AWS icons |
-
-## Toward the cloud deployment
-
-The API is stateless and runs behind a load balancer as several instances. The one piece of
-per-instance state - the open SSE connections - is handled by **PostgreSQL LISTEN/NOTIFY**: a queue
-change is announced on a database channel, every instance hears it, and each pushes to whichever of
-its own connections care. No message broker, no extra service, and because PostgreSQL withholds a
-notification until the transaction commits, nothing is ever announced that did not stick.
-
-Two seams were left deliberately swappable:
-
-* `NotificationSender` - today SMTP and a logger; SES/SNS/a WhatsApp provider drop in behind it
-  without touching any business logic.
-* `GraceSweepJob` - correct today under multiple replicas because of the per-queue lock, but a
-  leader election or a scheduled cloud trigger would avoid the duplicated work.
-
-## Deploying the frontend
-
-`npm run build` writes `out/` — plain static files, no server, no idle compute. Upload it to S3
-behind CloudFront (or Amplify, or any static host) and add **two rewrites**, because the two public
-URLs carry an id the export cannot know in advance:
-
-| Request | Serves |
-|---|---|
-| `/q/*` | `/q/index.html` |
-| `/t/*` | `/t/index.html` |
-
-Each shell reads its id from the address bar at runtime. `next dev` gets the same behaviour through
-the rewrites in `next.config.ts`, so development and production agree.
-
-Set `NEXT_PUBLIC_API_URL` at build time, and point the backend's `PUBLIC_BASE_URL` at the deployed
-SPA so QR codes and ticket links resolve.
-
-## Next
-
-Deployment itself: the S3/CloudFront distribution for the SPA, and a container for the API.
+| [docs/HANDOFF.md](docs/HANDOFF.md) | **Session handoff.** Where everything stands, how to run it, the measurements taken, conventions, and the open items |
+| [docs/gotchas.md](docs/gotchas.md) | **Read before deploying or deleting anything.** Lab limits, pipeline traps, and the decisions a cleanup would break |
+| [arquitectura-serverless.md](arquitectura-serverless.md) | The serverless design this was built from (in Spanish). Where the build deviates, [ROADMAP.md](ROADMAP.md#ajustes-al-diseño) says so |
+| [tp2/](tp2/) | The TP2 delivery: CloudFormation template, diagram and runbook |
