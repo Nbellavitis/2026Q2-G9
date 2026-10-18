@@ -5,11 +5,11 @@ fase anota qué se construyó, qué se decidió en el camino y por qué, qué se
 
 | Fase | Estado |
 |---|---|
-| 1 · Esqueleto que camina: Terraform y pipeline | **Código completo y verificado localmente. Falta correrlo en el lab.** |
-| 2 · Dominio y persistencia en DynamoDB | **Completa y verificada localmente** (94 tests, DynamoDB Local). La tabla `q-connections` falta crearla en el lab |
-| 3 · API síncrona y Cognito | **Código completo y verificado localmente** (104 tests, bundles probados contra DynamoDB Local). Falta correrlo en el lab |
-| 4 · Bus de eventos | **Código completo y verificado localmente** (109 tests, el stream real de DynamoDB Local). Falta correrlo en el lab |
-| 5 · Consumidores y tiempo real | **Código completo y verificado localmente** (116 tests, los 9 bundles cargan). Falta correrlo en el lab |
+| 1 · Esqueleto que camina: Terraform y pipeline | **Código completo y verificado localmente.** **Desplegada en el lab por el pipeline, con la prueba de humo en verde** (ver *Primera corrida en el lab*) |
+| 2 · Dominio y persistencia en DynamoDB | **Completa y verificada localmente** (94 tests, DynamoDB Local). **Desplegada en el lab por el pipeline, con la prueba de humo en verde** (ver *Primera corrida en el lab*) |
+| 3 · API síncrona y Cognito | **Código completo y verificado localmente** (104 tests, bundles probados contra DynamoDB Local). **Desplegada en el lab por el pipeline, con la prueba de humo en verde** (ver *Primera corrida en el lab*) |
+| 4 · Bus de eventos | **Código completo y verificado localmente** (109 tests, el stream real de DynamoDB Local). **Desplegada en el lab por el pipeline, con la prueba de humo en verde** (ver *Primera corrida en el lab*) |
+| 5 · Consumidores y tiempo real | **Código completo y verificado localmente** (116 tests, los 9 bundles cargan). **Desplegada en el lab por el pipeline, con la prueba de humo en verde** (ver *Primera corrida en el lab*) |
 | 6 · Retirar lo anterior | Pendiente |
 | 7 · Entrega | Pendiente |
 
@@ -778,3 +778,35 @@ negada. Por eso el primer paso es destruir:
    todavía, así que el paso de borrarlos no hace nada.
 3. Quitar la etiqueta y volver a correr el workflow del último push: el plan parte de un estado vacío.
 4. Aprobar el `apply`.
+
+### Resultado
+
+La salida funcionó tal cual: el `destroy` con `-refresh=false` borró los 29 recursos de la primera
+corrida, incluido `q-logs` (el provider lo borra con `DeleteBucket` y comprueba con `HeadBucket`, sin
+leer el object lock), y el paso de los buckets no encontró nada anotado. El plan siguiente partió de
+un estado vacío.
+
+**El apply pasó entero**, en la ejecución
+[39081506431](https://github.com/josebl123/tp-cloud/actions/runs/39081506431) (intento 2): el paso
+de los buckets anotó y creó los tres, Terraform agregó **200 recursos** (los 203 del plan original
+menos los tres `aws_s3_bucket`) y **la prueba de humo pasó completa**, incluido el recorrido del
+cliente en la cola de demo y el tiempo real por WebSocket.
+
+Comprobado además desde afuera, solo lectura:
+
+| | |
+|---|---|
+| El sitio, servido por API Gateway desde S3 con `LabRole` | 200, HTML. **El último riesgo del lab queda respondido**: API Gateway puede asumir `LabRole` |
+| Fuentes y JS (binarios) | 200, `font/woff2` sin corromper |
+| Una ruta que no existe | 404 con la página del sitio, no el XML de S3 |
+| `config.json` | Con el user pool, el cliente y la URL `wss://` |
+| `/api/v1/health` | 200: la Lambda escribe y lee `q-main` |
+| La cola de demo por la API pública | `Mesas`, abierta, con sus dos carriles |
+| La API del staff sin token | 401: el authorizer de Cognito la protege |
+
+Los tres riesgos que se anotaron antes de ir al lab: **las alarmas de CloudWatch están permitidas**,
+**API Gateway puede asumir `LabRole`**, y con la concurrencia de la cuenta no apareció ninguna
+limitación (los consumidores y la API respondieron en la prueba de humo; no se midió bajo carga).
+
+**Cada push a `entrega-3` dispara un plan y deja un apply esperando aprobación.** Si el cambio no
+toca la infraestructura, el plan sale sin cambios y ese apply se puede dejar sin aprobar.
