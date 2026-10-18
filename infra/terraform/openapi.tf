@@ -1,6 +1,6 @@
 # La definición completa de la API REST, como documento OpenAPI 3 con las extensiones de API Gateway.
 #
-# Con 34 rutas, declarar un recurso, un método, una integración y sus respuestas por cada una serían
+# Con 35 rutas, declarar un recurso, un método, una integración y sus respuestas por cada una serían
 # cientos de bloques casi iguales. En cambio, las rutas son una tabla (`api_routes`) y el documento se
 # arma a partir de ella con expresiones `for`: sumar un endpoint es sumar una línea a la tabla y su
 # handler en functions/src/handlers/.
