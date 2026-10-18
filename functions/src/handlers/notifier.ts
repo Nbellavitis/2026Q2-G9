@@ -6,6 +6,7 @@
 // duplicados: dos evaluaciones del mismo estado producen los mismos avisos, y la reserva condicional
 // de `NOTIF#type#cycle` evita el segundo envío.
 
+import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager'
 import { SendEmailCommand, SESv2Client } from '@aws-sdk/client-sesv2'
 import type { SQSBatchResponse, SQSEvent } from 'aws-lambda'
 import { ticketUrl } from '../api/views.js'
@@ -15,6 +16,7 @@ import { dueForEvent, dueThresholds } from '../domain/notifications.js'
 import type { NotificationRecord } from '../domain/types.js'
 import { snapshot } from '../domain/views.js'
 import type { PublishedEvent } from './stream-publisher.js'
+import { secretPassword, SmtpMailer } from '../notifications/smtp.js'
 import { render } from '../notifications/templates.js'
 import { createTableConfig } from '../persistence/client.js'
 import { DirectoryStore } from '../persistence/directory-store.js'
@@ -137,6 +139,17 @@ export class SesMailer implements Mailer {
   }
 }
 
+/**
+ * Gmail si el despliegue trae su remitente y su secreto (el caso del Learner Lab, que niega SES); si
+ * no, SES, que sin remitente simula el envío.
+ */
+function chooseMailer(): Mailer {
+  const smtpSender = process.env.SMTP_SENDER
+  const smtpSecret = process.env.SMTP_SECRET_ID
+  if (smtpSender && smtpSecret) return new SmtpMailer(smtpSender, secretPassword(smtpSecret, new SecretsManagerClient({})))
+  return new SesMailer(process.env.SENDER_EMAIL || null)
+}
+
 let deps: NotifierDependencies | undefined
 
 export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
@@ -145,7 +158,7 @@ export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {
     deps = {
       queues: new QueueStore(main),
       directory: new DirectoryStore(main),
-      mailer: new SesMailer(process.env.SENDER_EMAIL || null),
+      mailer: chooseMailer(),
       siteUrl: required('SITE_URL'),
     }
   }
