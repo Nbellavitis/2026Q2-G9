@@ -23,8 +23,9 @@ request has to come from a **branch of the same repository**: a fork does not re
 | Environment `aws-lab`, with required reviewers | Settings → Environments | The Apply and Destroy jobs run in it, so they wait for an approval |
 | Label `destroy` | Issues → Labels | Adding it to the pull request starts the Destroy job |
 | Secrets `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Settings → Secrets and variables → Actions | The lab's credentials (next section) |
+| Variables `SES_SENDER_EMAIL`, `SES_VERIFIED_RECIPIENTS`, `ALERT_EMAIL` (optional) | Settings → Secrets and variables → Actions → *Variables* tab | Real emails instead of simulated ones (below). Variables, not secrets: an address is not a secret |
 
-Nothing else is configured. The Terraform state lives in a bucket the pipeline creates the first time
+Nothing else is required. The Terraform state lives in a bucket the pipeline creates the first time
 it runs in an account, `tfstate-q-<account>-<region>`, versioned and private, with S3's native
 locking. It is not destroyed with the rest, so a later apply in the same account finds its state.
 
@@ -122,7 +123,7 @@ cd infra/terraform && terraform output -raw demo_staff_password
 
 ### What the defaults deploy
 
-The pipeline passes no variables, so the defaults in
+Apart from the three optional email variables, the pipeline passes nothing, so the defaults in
 [`variables.tf`](../infra/terraform/variables.tf) apply ([`terraform.tfvars.example`](../infra/terraform/terraform.tfvars.example)
 lists them):
 
@@ -133,6 +134,21 @@ lists them):
   addresses (`ses_verified_recipients`);
 * **no alarm emails** (`email_alertas = null`): the alarms exist and publish to the `q-alerts` topic,
   with no subscriber;
+
+**Real emails.** Set the repository variables and run the pipeline:
+
+| Variable | Example | Becomes |
+|---|---|---|
+| `SES_SENDER_EMAIL` | `queue.cloud.itba@gmail.com` (the group's mailbox) | `ses_sender_email`: the `From` of every customer email |
+| `SES_VERIFIED_RECIPIENTS` | `ana@gmail.com, beto@gmail.com` | `ses_verified_recipients`, comma-separated: who can receive while the account is in SES's sandbox |
+| `ALERT_EMAIL` | `ana@gmail.com` | `email_alertas`: subscribed to the alarms topic |
+
+After the apply, AWS emails a verification link to the sender and to each recipient, and SNS a
+subscription confirmation to the alert address. **Nothing is delivered until each one clicks its
+link** (the SES links expire after 24 hours; the pipeline recreates nothing, so ask for a new one from
+the SES console if it lapses). When testing, join the queue with one of the verified addresses: any
+other is rejected by the sandbox and the notifier logs it as simulated. A Gmail sender is not signed
+for `gmail.com`, so look in spam.
 * stage `prod`, region `us-east-1`, 14 days of logs, 12-hour staff sessions, and the throttling
   limits sized for the lab's Lambda concurrency.
 

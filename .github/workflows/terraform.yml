@@ -147,9 +147,24 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
 
+      # Los mails son variables del repositorio (Settings → Secrets and variables → Actions →
+      # Variables), no secrets: no son secretos y así se ven. Una que no existe llega vacía, y "" no
+      # es null para Terraform: solo se pasan las que tienen valor.
       - name: Plan
         working-directory: ${{ env.TF_DIR }}
+        env:
+          SES_SENDER_EMAIL: ${{ vars.SES_SENDER_EMAIL }}
+          SES_VERIFIED_RECIPIENTS: ${{ vars.SES_VERIFIED_RECIPIENTS }}
+          ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
         run: |
+          if [ -n "$SES_SENDER_EMAIL" ]; then export TF_VAR_ses_sender_email="$SES_SENDER_EMAIL"; fi
+          if [ -n "$ALERT_EMAIL" ]; then export TF_VAR_email_alertas="$ALERT_EMAIL"; fi
+          # Separadas por coma, como las escribe una persona: Terraform recibe la lista en JSON.
+          if [ -n "$SES_VERIFIED_RECIPIENTS" ]; then
+            TF_VAR_ses_verified_recipients=$(jq -cn --arg list "$SES_VERIFIED_RECIPIENTS" \
+              '$list | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
+            export TF_VAR_ses_verified_recipients
+          fi
           terraform plan -input=false -no-color -lock-timeout=10m -out=tfplan | tee plan.txt
           {
             echo '## Plan de Terraform'

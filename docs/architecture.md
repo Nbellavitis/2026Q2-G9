@@ -269,6 +269,18 @@ socket is down, the page polls.
 * **Staff** sign up and sign in against Cognito from the site's own pages, with
   `USER_PASSWORD_AUTH` and no hosted UI. The id token goes in `Authorization` and API Gateway's Cognito
   authorizer validates it before any function runs. Tokens last a 12-hour shift.
+
+  **Why the Lambda callback workaround from class does not apply.** That workaround exists because
+  Cognito's hosted UI redirects back with the tokens (or a `code`) to a callback URL that must be
+  HTTPS, and a site on S3 website hosting is plain HTTP; a `/callback` behind API Gateway and a Lambda
+  bridges the two. Neither condition holds here. There is no redirect: the sign-in form is ours and
+  calls Cognito's `InitiateAuth` directly over TLS, and Cognito returns the tokens in that response, so
+  there is no callback URL and no `code` to exchange. And the site is not on HTTP: API Gateway serves it
+  at a fixed `https://…execute-api…/prod/` address, so even with the hosted UI the callback could point
+  straight at one of our pages. What we give up without the hosted UI is its ready-made social sign-in
+  and MFA and recovery screens; in exchange, the password goes from the browser to Cognito and never
+  passes through our functions. The id token, not the access token, goes to the API because the Cognito
+  authorizer validates it as is; the access token would need OAuth scopes configured on every method.
 * **Customers** have no account. Their ticket token — unguessable, in the link they are emailed — is
   their whole credential, and it only shows their own place in line.
 
@@ -382,6 +394,7 @@ creating one. Procedure in [deployment.md](deployment.md).
 | Notifications | Decided from state by a consumer | Inside the staff transaction (the TP2): one movement can make dozens cross a threshold, which does not fit in a transaction |
 | Live updates | API Gateway WebSocket | Server-Sent Events: need a process holding the connection. Polling alone: slower and more invocations |
 | Staff auth | Cognito, validated by API Gateway | A Lambda authorizer and our own JWT: a secret to store, password hashing to maintain, and an invocation for every request the cache misses |
+| Staff sign-in | Our own form, `USER_PASSWORD_AUTH` against Cognito | The hosted UI with a `/callback` Lambda (the workaround from class): it solves an HTTP site needing an HTTPS redirect, and ours is already HTTPS with no redirect at all (§8.1) |
 | Channels | Email through SES only | Web Push, which the design proposed: a service worker and VAPID keys. SMS: sandboxed in the lab like SES, reaching only verified numbers |
 | Serving the site | API Gateway from a private S3 bucket | CloudFront: blocked in the lab. S3 website hosting: needs a public bucket, and plain HTTP |
 | Grace expiry | Delayed SQS message, plus lazy on read and write | Only lazy (the read path): a queue nobody looks at would never move. Only the timer: a page could show a call the clock already invalidated |
