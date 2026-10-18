@@ -8,11 +8,6 @@ variable "name" {
   }
 }
 
-variable "force_destroy" {
-  description = "Permite que `terraform destroy` borre el bucket aunque tenga objetos y versiones adentro."
-  type        = bool
-  default     = false
-}
 
 variable "versioning_enabled" {
   description = "Guarda las versiones anteriores de cada objeto, para poder volver atrás."
@@ -49,8 +44,3 @@ variable "additional_policy_documents" {
   default     = []
 }
 
-variable "tags" {
-  description = "Tags propios de este bucket, además de los que el provider aplica a todo."
-  type        = map(string)
-  default     = {}
-}

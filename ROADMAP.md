@@ -83,6 +83,7 @@ IAM. Secrets Manager sale del diseño.
 | 10 | **`λ lifecycle` libera en lotes de 24, no de 30.** Cada entrada liberada escribe cuatro ítems (borrar el SK viejo, escribir el nuevo, actualizar su referencia y su evento), y 24 × 4 + la cola = 97 entra en una transacción; 30 no entraba | Medido en la Fase 2 |
 | 11 | **Sin `activeCount` en `META`.** Cada mutación ya lee todas las entradas activas de la cola, así que la capacidad se cuenta sobre lo leído, bajo la misma versión. Un contador más sería un dato duplicado que puede desincronizarse | Fase 2 |
 | 12 | **Volver a la fila a alguien que había terminado es un ingreso nuevo.** Pasa por los controles de `join` y en su orden: su carril si todavía acepta su tamaño (si no, el que lo acepte hoy), el tope de ese carril y el de la cola | Su carril se pudo apagar o retirar mientras estaba afuera: la regla de los carriles solo cuenta a los activos. Revisión de las fases 1 a 5 |
+| 13 | **Los buckets los crea el pipeline; Terraform los configura.** `scripts/buckets.sh` los crea antes del apply con los nombres del plan y los borra después del destroy; el módulo `private-bucket` administra todo lo demás | El SCP del Learner Lab niega `s3:GetBucketObjectLockConfiguration`, que el provider lee después de crear cualquier `aws_s3_bucket`, en todas sus versiones. Primera corrida en el lab |
 
 ---
 

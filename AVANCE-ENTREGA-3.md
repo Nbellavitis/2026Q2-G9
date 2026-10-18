@@ -745,7 +745,36 @@ puede usar en esta cuenta.
 | Sin probar todavía | Que API Gateway pueda asumir `LabRole` para leer el sitio: el apply no llegó |
 | `destroy` | **También falla hoy**: refresca el estado antes de destruir, y refrescar el bucket hace la misma lectura negada. Salida: `terraform destroy -refresh=false`, que el workflow todavía no pasa. Lo desplegado cuesta casi nada mientras tanto |
 
-Pendiente de decidir cómo se crean los buckets. Antes de elegir, conviene saber qué otras lecturas
-de S3 niega el SCP, porque cualquier alternativa sigue usando `aws_s3_bucket_versioning`,
-`_logging`, `_policy`, `_public_access_block`, `_ownership_controls` y `_lifecycle_configuration`, y
-cada uno lee su propia API.
+### Qué lecturas de S3 niega el SCP
+
+Probado desde CloudShell contra el bucket `q-logs` que quedó creado, con las 16 lecturas de bucket:
+**solo `get-object-lock-configuration` está negada.** Versionado, registros de acceso, política,
+bloqueo de acceso público, propiedad, ciclo de vida, ubicación, ACL, CORS, sitio web, aceleración,
+pago por pedido, cifrado, replicación y tags responden.
+
+### Decisión: el pipeline crea los buckets, Terraform los configura
+
+| | |
+|---|---|
+| `scripts/buckets.sh` | `create` anota los nombres en el bucket del estado (`queue/buckets.txt`) y después crea los que falten. `delete` vacía cada uno (todas las versiones y marcas de borrado) y lo borra, en el orden anotado, con reintentos para los registros de acceso que S3 entrega con atraso |
+| Job `apply` | Paso nuevo antes del apply: lee los nombres del output `bucket_names` **del plan guardado** y llama a `create`. Terraform sigue siendo la única fuente de los nombres |
+| Output `bucket_names` | Sale de `local.bucket_names` y no de los módulos, para que se conozca en el plan |
+| Módulo `private-bucket` | Ya no tiene `aws_s3_bucket`: recibe el nombre de un bucket existente y administra todo lo demás. Sin `force_destroy` ni `tags`, que eran atributos de ese recurso. El ARN sale de `data "aws_partition"` |
+| Job `destroy` | `-refresh=false`, y después `delete`. Se anotan los nombres antes de crear, así `destroy` los encuentra aunque un apply se corte entre crear los buckets y escribir sus outputs |
+
+Probado en local: `fmt`, `validate`, tflint y shellcheck limpios, y `buckets.sh` ejercitado contra un
+S3 simulado (borrar sin nada anotado, crear, crear de nuevo sin efecto, vaciar de a páginas y borrar
+en orden, y fallar si el plan no trae nombres).
+
+### Cómo salir del estado de la primera corrida
+
+El estado tiene el `aws_s3_bucket` de `q-logs` marcado como *tainted*, y ese recurso ya no está en la
+configuración. **Cualquier `plan` falla mientras siga ahí**: lo refresca, y refrescarlo es la lectura
+negada. Por eso el primer paso es destruir:
+
+1. Push del cambio. El `plan` de ese push falla por eso; es lo esperado.
+2. Etiqueta `destroy` en el PR y aprobar `aws-lab`. Con `-refresh=false` borra todo lo de la primera
+   corrida, incluido `q-logs` (el provider lo borra sin leer su object lock). No hay buckets anotados
+   todavía, así que el paso de borrarlos no hace nada.
+3. Quitar la etiqueta y volver a correr el workflow del último push: el plan parte de un estado vacío.
+4. Aprobar el `apply`.

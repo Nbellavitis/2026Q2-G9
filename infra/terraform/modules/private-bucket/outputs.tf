@@ -1,6 +1,6 @@
 output "name" {
   description = "Nombre del bucket. Se entrega recién cuando el bucket está configurado del todo."
-  value       = aws_s3_bucket.this.bucket
+  value       = var.name
 
   # Quien usa el nombre no ve el versionado ni la política, porque son recursos aparte. Sin esto,
   # un objeto se podría subir antes de que el versionado esté activo y quedar sin version_id, que es
@@ -13,5 +13,5 @@ output "name" {
 
 output "arn" {
   description = "ARN del bucket, para políticas e integraciones."
-  value       = aws_s3_bucket.this.arn
+  value       = local.arn
 }

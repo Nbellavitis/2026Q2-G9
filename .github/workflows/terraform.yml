@@ -230,7 +230,8 @@ jobs:
           name: tfplan
           path: ${{ env.TF_DIR }}
 
-      - uses: ./.github/actions/terraform-init
+      - id: init
+        uses: ./.github/actions/terraform-init
         with:
           terraform-version: ${{ env.TF_VERSION }}
           working-directory: ${{ env.TF_DIR }}
@@ -243,6 +244,20 @@ jobs:
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      # Terraform no puede crear los buckets: el SCP del Learner Lab niega la lectura de object lock
+      # que el provider hace después de crear cualquier `aws_s3_bucket` (scripts/buckets.sh explica
+      # el detalle). Se crean acá, con los nombres que decidió Terraform en el plan guardado, y el
+      # módulo private-bucket configura todo lo demás. El bucket de logs va último en la lista porque
+      # es el orden en que se borran: recibe los registros de los otros dos.
+      - name: Buckets
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          STATE_BUCKET: ${{ steps.init.outputs.state-bucket }}
+        run: |
+          mapfile -t names < <(terraform show -json tfplan \
+            | jq -r '.planned_values.outputs.bucket_names.value | to_entries | sort_by(.key == "logs") | .[].value')
+          bash scripts/buckets.sh create "$STATE_BUCKET" "${names[@]}"
 
       - name: Apply
         working-directory: ${{ env.TF_DIR }}
@@ -327,7 +342,8 @@ jobs:
             echo 'export const handler = async () => ({})' > "functions/dist/$name/index.mjs"
           done
 
-      - uses: ./.github/actions/terraform-init
+      - id: init
+        uses: ./.github/actions/terraform-init
         with:
           terraform-version: ${{ env.TF_VERSION }}
           working-directory: ${{ env.TF_DIR }}
@@ -336,6 +352,16 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
 
+      # Sin refresh: refrescar un bucket creado con `aws_s3_bucket` (como el que dejó la primera
+      # corrida) repite la lectura de object lock que el SCP del lab niega, y el destroy fallaría
+      # antes de borrar nada. Destruir lo que dice el estado alcanza.
       - name: Destroy
         working-directory: ${{ env.TF_DIR }}
-        run: terraform destroy -input=false -no-color -lock-timeout=10m -auto-approve
+        run: terraform destroy -input=false -no-color -lock-timeout=10m -auto-approve -refresh=false
+
+      # Los buckets los creó el pipeline, así que los borra el pipeline, en el orden anotado.
+      - name: Borrar los buckets
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          STATE_BUCKET: ${{ steps.init.outputs.state-bucket }}
+        run: bash scripts/buckets.sh delete "$STATE_BUCKET"

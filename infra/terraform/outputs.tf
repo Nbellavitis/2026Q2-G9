@@ -41,7 +41,9 @@ output "user_pool_client_id" {
 
 output "bucket_names" {
   description = "Los tres buckets privados, por función."
-  value       = merge({ for key, bucket in module.private_buckets : key => bucket.name }, { logs = module.logs_bucket.name })
+  # Directo de los locals, no de los módulos, para que se conozca en el plan: el pipeline lo lee del
+  # plan guardado para crear los buckets antes del apply.
+  value = local.bucket_names
 }
 
 output "main_table_name" {
