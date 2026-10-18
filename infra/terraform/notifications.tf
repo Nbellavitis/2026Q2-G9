@@ -1,6 +1,8 @@
-# SES para los avisos a clientes. La cuenta del Learner Lab queda en el sandbox de SES: solo puede
-# mandar desde y hacia direcciones verificadas. Crear una identidad le manda a esa dirección un email
-# de AWS con un link que hay que abrir.
+# SES para los avisos a clientes. **El Learner Lab lo niega entero**: ni el rol del pipeline ni LabRole
+# pueden crear o verificar una identidad, ni mandar. En el lab, ses_sender_email queda en null y los
+# avisos se simulan. En una cuenta con SES (que empieza en el sandbox: solo manda desde y hacia
+# direcciones verificadas), crear una identidad le manda a esa dirección un email de AWS con un link
+# que hay que abrir.
 #
 # Sin remitente, o hacia alguien no verificado, el notifier escribe el email en sus logs en lugar de
 # mandarlo: un envío simulado, que la consigna permite.

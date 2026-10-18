@@ -72,7 +72,7 @@ buckets.
 | Data | DynamoDB: `q-main` (single table, Streams, PITR, TTL) and `q-connections` |
 | Events | DynamoDB Streams → `stream-publisher` → SNS FIFO → SQS (`push` FIFO, `notifications` filtered, `lifecycle` delayed), each with a DLQ and alarms |
 | Identity | Cognito user pool for staff; customers are anonymous, authorised by their ticket token |
-| Email | SES, sandboxed in the lab |
+| Email | SES, denied in the Learner Lab: emails are simulated (written to the notifier's log) |
 | Infrastructure | Terraform 1.16, AWS provider 6.67, one external module (`terraform-aws-modules/dynamodb-table` 5.5.2) and three of our own (`private-bucket`, `lambda-function`, `queue-with-dlq`) |
 | Pipeline | GitHub Actions on the pull request: validate, build, plan; apply after approving `aws-lab`; destroy with the `destroy` label |
 | Frontend | Next.js 16 static export, React 19, Tailwind 4 |

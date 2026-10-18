@@ -23,7 +23,7 @@ request has to come from a **branch of the same repository**: a fork does not re
 | Environment `aws-lab`, with required reviewers | Settings → Environments | The Apply and Destroy jobs run in it, so they wait for an approval |
 | Label `destroy` | Issues → Labels | Adding it to the pull request starts the Destroy job |
 | Secrets `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Settings → Secrets and variables → Actions | The lab's credentials (next section) |
-| Variables `SES_SENDER_EMAIL`, `SES_VERIFIED_RECIPIENTS`, `ALERT_EMAIL` (optional) | Settings → Secrets and variables → Actions → *Variables* tab | Real emails instead of simulated ones (below). Variables, not secrets: an address is not a secret |
+| Variable `ALERT_EMAIL` (optional) | Settings → Secrets and variables → Actions → *Variables* tab | Alarm emails (below). A variable, not a secret: an address is not a secret |
 
 Nothing else is required. The Terraform state lives in a bucket the pipeline creates the first time
 it runs in an account, `tfstate-q-<account>-<region>`, versioned and private, with S3's native
@@ -123,22 +123,33 @@ cd infra/terraform && terraform output -raw demo_staff_password
 
 ### What the defaults deploy
 
-Apart from the three optional email variables, the pipeline passes nothing, so the defaults in
+Apart from the optional email variables, the pipeline passes nothing, so the defaults in
 [`variables.tf`](../infra/terraform/variables.tf) apply ([`terraform.tfvars.example`](../infra/terraform/terraform.tfvars.example)
 lists them):
 
 * **demo data on** (`cargar_demo`): an establishment with two queues and lanes, and the demo staff
   user;
 * **emails simulated** (`ses_sender_email = null`): the notifier writes each email to its CloudWatch
-  log instead of sending it. With a verified sender, SES's sandbox still only delivers to verified
-  addresses (`ses_verified_recipients`);
+  log, as `emailSimulado`, instead of sending it;
 * **no alarm emails** (`email_alertas = null`): the alarms exist and publish to the `q-alerts` topic,
   with no subscriber;
+* stage `prod`, region `us-east-1`, 14 days of logs, 12-hour staff sessions, and the throttling
+  limits sized for the lab's Lambda concurrency.
 
-**Real emails.** Set the repository variables and run the pipeline:
+**Alarm emails.** Set the repository variable `ALERT_EMAIL` (Settings → Secrets and variables →
+Actions → *Variables*) and run the pipeline: it becomes `email_alertas`, subscribed to the alarms
+topic. That is SNS, not SES, and it works in the Learner Lab. SNS emails a subscription confirmation
+after the apply; nothing arrives until the link is opened.
 
-| Variable | Example | Becomes |
-|---|---|---|
+**Customer emails cannot be sent from the Learner Lab.** The lab denies SES outright: the role the
+pipeline uses (`voclabs`) cannot create or verify an identity, through either API version, nor send;
+and `LabRole`, the functions' role, has an explicit deny on `ses:SendEmail`,
+`ses:CreateEmailIdentity` and `ses:VerifyEmailIdentity`. So in the lab the notifications stay
+simulated, which the assignment allows. The workflow still passes `SES_SENDER_EMAIL` and
+`SES_VERIFIED_RECIPIENTS` to Terraform for an account where SES is allowed; **in the Learner Lab, do
+not set them**: the apply fails creating the identities.
+
+---|---|---|
 | `SES_SENDER_EMAIL` | `queue.cloud.itba@gmail.com` (the group's mailbox) | `ses_sender_email`: the `From` of every customer email |
 | `SES_VERIFIED_RECIPIENTS` | `ana@gmail.com, beto@gmail.com` | `ses_verified_recipients`, comma-separated: who can receive while the account is in SES's sandbox |
 | `ALERT_EMAIL` | `ana@gmail.com` | `email_alertas`: subscribed to the alarms topic |
@@ -194,6 +205,7 @@ nothing outside the pipeline changes these resources.
 | Apply fails with `AccessDenied` on `GetBucketObjectLockConfiguration` | An `aws_s3_bucket` resource is in the state or the configuration | Buckets are created by `buckets.sh`; the `private-bucket` module receives an existing name. If an old run left one in the state, destroy (it skips the refresh) and apply again |
 | Smoke test: `La API no respondió` | The API Gateway deployment had not propagated, or the health function failed | Check the `q-public` function's log group; re-run the Apply job |
 | The site loads but sign-in fails | `config.json` missing or stale | It is written by Terraform (`site.tf`); re-apply |
-| Emails never arrive | SES sandbox, or no sender configured | Expected with the defaults: look for `emailSimulado` in the `q-notifier` log group |
+| Emails never arrive | The Learner Lab denies SES | Expected: look for `emailSimulado` in the `q-notifier` log group |
+| Apply fails with `AccessDenied` on `ses:CreateEmailIdentity` or `ses:TagResource` | `SES_SENDER_EMAIL` or `SES_VERIFIED_RECIPIENTS` is set, and the lab denies SES | Delete both variables and run the pipeline again |
 
 Lab limits behind these, and the rest of the traps, are in [gotchas.md](gotchas.md).

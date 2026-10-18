@@ -206,9 +206,9 @@ really does produce a second "it's your turn".
 
 Notifications go by email through SES, and only to the email: a customer who left just a phone
 number has no channel (there is no SMS). A failed send is recorded on the item and retried, up to 5
-attempts; it never undoes a queue movement. In the Learner Lab, SES stays in its sandbox, so an email
-to an unverified address, or with no sender configured, is written to the function's log instead and
-recorded as channel `LOG`.
+attempts; it never undoes a queue movement. The Learner Lab denies SES entirely, so there no sender is
+configured and every email is written to the function's log instead, recorded as channel `LOG`. With
+a sender in an account that allows SES, an address SES's sandbox rejects falls back the same way.
 
 ## Metrics
 

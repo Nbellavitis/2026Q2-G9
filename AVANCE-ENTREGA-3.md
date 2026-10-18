@@ -863,3 +863,42 @@ destruidos, y los tres buckets vaciados y borrados por `buckets.sh delete`.
 - **Revocar la contraseña de aplicación de Gmail** que estaba en ese `app.env`, y rotar la de RDS si
   la base sigue existiendo.
 
+---
+
+## Mails reales: el lab niega SES
+
+El commit `701ae75` pasó al plan las variables del repositorio `SES_SENDER_EMAIL`,
+`SES_VERIFIED_RECIPIENTS` y `ALERT_EMAIL`. Con las tres cargadas (el mail del grupo como remitente y
+los cuatro del equipo como destinatarios), dos applies fallaron en las cinco identidades de SES; todo
+lo demás se creó:
+
+| Ejecución | Error |
+|---|---|
+| [39135312198](https://github.com/josebl123/tp-cloud/actions/runs/39135312198) | `ses:TagResource` denegado: `CreateEmailIdentity` manda los tags del `default_tags` en la misma llamada |
+| [39167880552](https://github.com/josebl123/tp-cloud/actions/runs/39167880552) | Con las identidades sin tags (un provider con alias), `ses:CreateEmailIdentity` denegado |
+
+Probado después desde CloudShell:
+
+| | Resultado |
+|---|---|
+| `ses verify-email-identity` (API v1), con el rol del lab | `AccessDenied` |
+| `ses get-identity-verification-attributes`, con el rol del lab | `AccessDenied` |
+| `sesv2 send-email` al simulador de SES, con el rol del lab | `AccessDenied` sobre `ses:SendEmail` |
+| `simulate-principal-policy` sobre `LabRole` | `explicitDeny` en `ses:SendEmail`, `ses:CreateEmailIdentity` y `ses:VerifyEmailIdentity` |
+
+**En este lab no hay SES**, ni para el pipeline ni para las funciones, y un deny explícito no se
+puede compensar con nada de nuestro lado. Decidido:
+
+- Se borraron las variables `SES_SENDER_EMAIL` y `SES_VERIFIED_RECIPIENTS`: los avisos vuelven a
+  simularse (el notifier los escribe en su log), que la consigna permite. El workflow las sigue
+  pasando, para una cuenta donde SES esté permitido.
+- `ALERT_EMAIL` queda: es una suscripción de SNS, que el lab sí permite, y se creó bien.
+- Se revirtió el provider sin tags: arreglaba un problema real, pero la creación está negada igual.
+- Descartado por ahora: mandar por el SMTP de Gmail desde el notifier. Entregaría a cualquier
+  dirección, pero vuelve a haber un secreto (la contraseña de aplicación), justo lo que marcó la
+  corrección del TP2.
+
+Corregidos `deployment.md`, `gotchas.md`, `architecture.md`, `domain-model.md`, `HANDOFF.md`, el
+README, `notifications.tf` y `terraform.tfvars.example`, que daban los mails reales como posibles en
+el lab.
+

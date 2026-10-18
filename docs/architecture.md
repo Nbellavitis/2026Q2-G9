@@ -147,7 +147,7 @@ release reaches the notifier, which tells each customer the queue closed.
 | `ws-connections` | API Gateway WebSocket `$connect`, `$disconnect` | Validates the customer's ticket or the staff member's one-time ticket, and records the connection |
 | `stream-publisher` | DynamoDB Streams on `q-main`, filtered to new event items | Publishes each event to SNS; schedules grace expiry and queue release on `q-lifecycle` |
 | `broadcaster` | SQS FIFO `q-push` | Pushes the current board and tickets to the connections watching a queue |
-| `notifier` | SQS `q-notifications` | Decides which notifications are due and sends them through SES, once each |
+| `notifier` | SQS `q-notifications` | Decides which notifications are due and sends them through SES, once each (simulated in the Learner Lab, which denies SES) |
 | `lifecycle` | SQS `q-lifecycle` | Applies due grace periods and releases closed queues in batches |
 | `seed` | Invoked by Terraform on apply | Loads the demo establishment, queues and lanes, idempotently |
 | `cognito-pre-signup` | Cognito pre sign-up | Confirms new accounts on the spot, so sign-up has no code step |
@@ -395,7 +395,7 @@ creating one. Procedure in [deployment.md](deployment.md).
 | Live updates | API Gateway WebSocket | Server-Sent Events: need a process holding the connection. Polling alone: slower and more invocations |
 | Staff auth | Cognito, validated by API Gateway | A Lambda authorizer and our own JWT: a secret to store, password hashing to maintain, and an invocation for every request the cache misses |
 | Staff sign-in | Our own form, `USER_PASSWORD_AUTH` against Cognito | The hosted UI with a `/callback` Lambda (the workaround from class): it solves an HTTP site needing an HTTPS redirect, and ours is already HTTPS with no redirect at all (§8.1) |
-| Channels | Email through SES only | Web Push, which the design proposed: a service worker and VAPID keys. SMS: sandboxed in the lab like SES, reaching only verified numbers |
+| Channels | Email through SES only, simulated in the Learner Lab | Web Push, which the design proposed: a service worker and VAPID keys. SMS: sandboxed. Gmail over SMTP from the notifier: would deliver, at the price of an app password to keep as a secret |
 | Serving the site | API Gateway from a private S3 bucket | CloudFront: blocked in the lab. S3 website hosting: needs a public bucket, and plain HTTP |
 | Grace expiry | Delayed SQS message, plus lazy on read and write | Only lazy (the read path): a queue nobody looks at would never move. Only the timer: a page could show a call the clock already invalidated |
 | Bucket creation | The pipeline, with the AWS CLI | `aws_s3_bucket`: fails in the lab, the SCP denies a read the provider makes after creating it |
@@ -407,7 +407,9 @@ creating one. Procedure in [deployment.md](deployment.md).
 
 * **The lab's credentials expire** with each session and have to be loaded into the secrets by hand.
   A normal account would use an OIDC role, which the lab cannot create.
-* **Emails are simulated** with the defaults, and SES's sandbox only delivers to verified addresses.
+* **Customer emails are simulated in the Learner Lab.** The lab denies SES to every role, so the
+  notifier logs each email instead of sending it. In an account that allows SES, setting a sender and
+  verified recipients turns them into real emails.
 * **No SMS.** A customer who leaves only a phone number gets no notifications.
 * **Every deployment changes the site**: the Next.js build ID is random, so about 75 objects are
   re-uploaded, and the REST API redeployed, even when the frontend did not change.

@@ -65,7 +65,7 @@ infos in the smoke test; the pipeline does not run actionlint.
 | An SCP denies `s3:GetBucketObjectLockConfiguration` | The AWS provider reads it right after creating any `aws_s3_bucket`, and fails on the denial in every version tried (v4.67, v5.100, v6.67). So the pipeline creates the buckets with the CLI before the apply (`scripts/buckets.sh`), with the names from the saved plan, and Terraform configures everything else on them. It is the only bucket read denied, out of 16 tried |
 | No IAM roles or OIDC providers can be created | Every function, API Gateway and the pipeline use `LabRole`. That is also why the credentials are session keys in secrets and not a role GitHub assumes |
 | CloudFront is blocked | API Gateway serves the site from the private bucket, on the same origin as the API |
-| SES stays in its sandbox | Email only reaches verified addresses. To anything else, the notifier writes the email to its log and records it as channel `LOG` |
+| SES is denied | Neither the lab's user role nor `LabRole` can verify an address or send (explicit deny on `ses:SendEmail`, `ses:CreateEmailIdentity`, `ses:VerifyEmailIdentity`). The notifier writes each email to its log and records it as channel `LOG`. Setting `SES_SENDER_EMAIL` or `SES_VERIFIED_RECIPIENTS` makes the apply fail |
 | Lambda concurrency is limited | API Gateway throttles before Lambda does (429 instead of a 5xx), and each SQS consumer has its own ceiling (`consumer_max_concurrency`), so a burst of notifications cannot starve the API or the live push |
 
 ---

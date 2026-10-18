@@ -20,7 +20,7 @@ the TP2; [`AVANCE-ENTREGA-3.md`](AVANCE-ENTREGA-3.md) has where each phase stand
 |---|---|
 | **1. Acceso e ingreso mediante QR** | `GET /public/queues/{id}/qr` renders the code; `POST /public/queues/{id}/entries` joins with a name plus one contact channel. |
 | **2. Seguimiento de la espera** | `GET /public/tickets/{token}`, then pushed over the WebSocket: position, people ahead, estimated wait, recomputed on every movement. |
-| **3. Notificaciones del turno** | Configurable proximity thresholds (by position and by minutes), the "it's your turn" alert, and an audited notification history, sent by email through SES. |
+| **3. Notificaciones del turno** | Configurable proximity thresholds (by position and by minutes), the "it's your turn" alert, and an audited notification history, by email through SES. The Learner Lab denies SES, so there each email is written to the notifier's log instead. |
 | **4. Gestion de la fila por el comercio** | Staff board, call / serve / no-show / cancel, pause and resume, lanes by party size, and queue + establishment metrics. |
 | **5. Abandono y periodo de gracia** | `DELETE /public/tickets/{token}` frees the place; a configurable grace period plus four no-show policies decide what happens to someone who does not show up. |
 | **Idiomas** | English and Spanish, following the browser. The locale is stored with the entry, so notification emails arrive in the same language as the page the customer joined from. |
