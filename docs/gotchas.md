@@ -38,8 +38,9 @@ forever, if nobody approves. Approve or cancel the pending apply first.
 
 **Every push to the pull request plans and asks to apply** — documentation-only pushes included, and
 such a plan is not empty. The Next.js build ID is random, so every build changes about 75 site
-objects, and the WebSocket API's deployment is replaced on every plan. Leave the apply unapproved if
-you do not want it, and cancel it before a destroy (previous point).
+objects and the 404 page embedded in the REST API, which replaces its deployment; the WebSocket API's
+deployment is replaced on every plan too. Leave the apply unapproved if you do not want it, and cancel
+it before a destroy (previous point).
 
 **With the lab stopped, the plan job goes red** on the expired credentials. Expected, and harmless:
 no apply is queued.

@@ -324,15 +324,18 @@ AWS.**
 
 ## Fase 6 · Retirar lo anterior
 
-- [ ] Borrar `backend/` entero (Spring Boot, JPA, Flyway, PostgreSQL, la autenticación propia y sus
+- [x] Borrar `backend/` entero (Spring Boot, JPA, Flyway, PostgreSQL, la autenticación propia y sus
       tests): el dominio ya vive en `functions/src/domain` con sus tests portados.
-- [ ] Sacar el `Dockerfile` del backend y el servicio de systemd.
-- [ ] Reemplazar `docker-compose.yml` por DynamoDB Local para desarrollo.
+- [x] Sacar el `Dockerfile` del backend y el servicio de systemd.
+- [x] ~~Reemplazar `docker-compose.yml` por DynamoDB Local para desarrollo.~~ Se borró sin
+      reemplazo: los tests levantan su propio DynamoDB Local con Testcontainers, y el frontend se
+      desarrolla contra la API desplegada en el lab, por un proxy de `next dev` (ver AVANCE).
 - [ ] Borrar el `app.env` del bucket de artefactos del TP2 y **revocar la contraseña de aplicación de
       Gmail** que estaba adentro: estuvo en texto plano en S3.
-- [ ] Borrar `infra/q-stack.yaml` y `infra/q-architecture.drawio`, o moverlos a una carpeta de
-      historial del TP2.
-- [ ] Actualizar `docs/architecture.md`, `docs/deployment.md` y el README principal.
+- [x] Borrar `infra/q-stack.yaml` y `infra/q-architecture.drawio`, o moverlos a una carpeta de
+      historial del TP2: movidos a `tp2/`, con el runbook.
+- [x] Actualizar `docs/architecture.md`, `docs/deployment.md` y el README principal. También el
+      resto de `docs/`.
 
 **Listo cuando:** no queda nada en el repo que describa el despliegue anterior como vigente.
 

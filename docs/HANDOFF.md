@@ -1,7 +1,7 @@
 # Q — session handoff
 
 Everything a new session or a teammate needs to continue without re-deriving it. Written
-2026-10-17, on branch `entrega-3`, during Phase 6 of [ROADMAP.md](../ROADMAP.md).
+2026-10-17, on branch `entrega-3`, at the end of Phase 6 of [ROADMAP.md](../ROADMAP.md).
 
 > Read [gotchas.md](gotchas.md) before deploying or deleting anything on AWS. This document is the
 > map; that one is the minefield.
@@ -27,7 +27,7 @@ is not meant to be merged before the correction.
 |---|---|---|
 | **1 — Propuesta** | Pick and justify an idea | Done. Idea 1, "Queue" |
 | **2 — Diseño y Demo de Arquitectura Fundacional** | A design document and a live demo in the lab | Done. Spring Boot on EC2 behind a load balancer, RDS, CloudFormation. Kept in [`tp2/`](../tp2/) and in git history |
-| **3 — Terraform** | Implement the architecture with Terraform, deployed from a GitHub Actions pipeline that runs on the pull request, with the TP2's corrections | In progress: Phases 1–5 deployed, Phase 6 being finished, Phase 7 pending |
+| **3 — Terraform** | Implement the architecture with Terraform, deployed from a GitHub Actions pipeline that runs on the pull request, with the TP2's corrections | In progress: Phases 1–5 deployed, Phase 6 done in the repository, Phase 7 pending |
 
 The rubric and how each point is met are in [ROADMAP.md](../ROADMAP.md#cómo-se-evalúa). 40 % is that
 it deploys and works, 30 % is modules. **The cátedra has to be able to run it in their own lab
@@ -51,7 +51,7 @@ throughout, and queue lanes by party size.
 | 3 · Synchronous API and Cognito | Deployed |
 | 4 · Event bus | Deployed |
 | 5 · Consumers and realtime | Deployed |
-| 6 · Retire the old system | Being finished: Java backend, compose file and SSE removed, TP2 files moved, docs rewritten |
+| 6 · Retire the old system | Done in the repository: Java backend, compose file and SSE removed, TP2 files moved, docs rewritten. The lab-side cleanup is pending (§9) |
 | 7 · Delivery | Pending: `infra/terraform/README.md`, a README per module, the updated diagram, a dry run by someone who did not write the Terraform, the PR to the cátedra's repository |
 
 [AVANCE-ENTREGA-3.md](../AVANCE-ENTREGA-3.md) is the detailed log, phase by phase: what was built,
@@ -152,7 +152,7 @@ cd infra/terraform && terraform fmt -check -recursive && terraform init -backend
 | S3 reads the lab's SCP denies | 1 of 16: `GetBucketObjectLockConfiguration` | CloudShell probe, AVANCE |
 | Release batch for a closed queue | 24 entries (4 items each + the queue fit in a 100-item transaction; 30 did not) | Phase 2 |
 | Test suite | 128 tests, 5 clean runs in a row; one race test failed once in ~29 runs | Phase 1–5 review |
-| A documentation-only push | Plans ~75 site objects to change and replaces the WebSocket deployment | After the first deployment |
+| A documentation-only push | 5 to add, 75 to change, 5 to destroy: the site's objects, and both API deployments | Actions run 39082539689 |
 
 ---
 
@@ -202,8 +202,9 @@ password if the database is kept.
 1. **The flaky race test** ("tres a la vez" in `races.test.ts`, once in ~29 runs). Not the optimistic
    lock. If it fails in the pipeline, the cancellation reasons are in the error message.
 2. **Every build changes the site.** The Next.js build ID is random; pinning it (`generateBuildId`)
-   would make a plan with no frontend changes leave the site alone. The WebSocket deployment is
-   replaced on every plan too.
+   would make a plan with no frontend changes leave the site alone — and the REST API's deployment
+   too, since the 404 page is embedded in the API definition. The WebSocket deployment is replaced
+   on every plan as well; why is still to be found.
 3. **`reasons[0]` in `commit`** only recognises a version conflict at position 0. Correct today, and
    widening it would break the order-key protection ([gotchas.md](gotchas.md) §6).
 4. **No frontend test suite.** Playwright against a deployed stack is the obvious next step.

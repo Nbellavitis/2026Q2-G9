@@ -397,7 +397,7 @@ creating one. Procedure in [deployment.md](deployment.md).
 * **Emails are simulated** with the defaults, and SES's sandbox only delivers to verified addresses.
 * **No SMS.** A customer who leaves only a phone number gets no notifications.
 * **Every deployment changes the site**: the Next.js build ID is random, so about 75 objects are
-  re-uploaded even when the frontend did not change.
+  re-uploaded, and the REST API redeployed, even when the frontend did not change.
 * **One race test is flaky**, about once in 30 runs, without a reproduced cause; it is not the
   optimistic control, which is what it tests.
 * **Historical metrics are out of scope** for this delivery (Firehose, S3, Glue, Athena are future

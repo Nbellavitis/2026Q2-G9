@@ -10,7 +10,7 @@ fase anota qué se construyó, qué se decidió en el camino y por qué, qué se
 | 3 · API síncrona y Cognito | **Código completo y verificado localmente** (104 tests, bundles probados contra DynamoDB Local). **Desplegada en el lab por el pipeline, con la prueba de humo en verde** (ver *Primera corrida en el lab*) |
 | 4 · Bus de eventos | **Código completo y verificado localmente** (109 tests, el stream real de DynamoDB Local). **Desplegada en el lab por el pipeline, con la prueba de humo en verde** (ver *Primera corrida en el lab*) |
 | 5 · Consumidores y tiempo real | **Código completo y verificado localmente** (116 tests, los 9 bundles cargan). **Desplegada en el lab por el pipeline, con la prueba de humo en verde** (ver *Primera corrida en el lab*) |
-| 6 · Retirar lo anterior | Pendiente |
+| 6 · Retirar lo anterior | **Completa en el repositorio** (ver *Fase 6*). Falta la parte del lab: borrar lo que quedó del TP2 y el `app.env`, y revocar la contraseña de Gmail |
 | 7 · Entrega | Pendiente |
 
 ---
@@ -808,5 +808,58 @@ Los tres riesgos que se anotaron antes de ir al lab: **las alarmas de CloudWatch
 **API Gateway puede asumir `LabRole`**, y con la concurrencia de la cuenta no apareció ninguna
 limitación (los consumidores y la API respondieron en la prueba de humo; no se midió bajo carga).
 
-**Cada push a `entrega-3` dispara un plan y deja un apply esperando aprobación.** Si el cambio no
-toca la infraestructura, el plan sale sin cambios y ese apply se puede dejar sin aprobar.
+**Cada push a `entrega-3` dispara un plan y deja un apply esperando aprobación**, y ese plan nunca
+sale vacío. **Corregido:** acá decía que un cambio que no toca la infraestructura planea sin cambios,
+y no es así. El push de este registro, que solo tocó documentación, planeó 5 a crear, 75 a cambiar y 5
+a destruir (ejecución 39082539689): el build ID de Next es aleatorio, así que cada build cambia los
+objetos del sitio, y la página 404 que va adentro de la definición de la API REST, que por eso
+reemplaza su deployment; el deployment de la API WebSocket también se reemplazó, sin que se sepa
+todavía por qué. Ese apply se puede dejar sin aprobar, pero **un apply pendiente retiene el grupo de
+concurrencia y bloquea el destroy**: hay que cancelarlo antes de destruir. Fijar el build ID
+(`generateBuildId`) queda como mejora.
+
+---
+
+## Fase 6 · Retirar lo anterior
+
+Antes de empezar, el despliegue del lab se destruyó desde el pipeline (ejecución
+[39083049121](https://github.com/josebl123/tp-cloud/actions/runs/39083049121)): 200 recursos
+destruidos, y los tres buckets vaciados y borrados por `buckets.sh delete`.
+
+### Qué se hizo
+
+| | |
+|---|---|
+| `backend/` | Borrado entero, con el `Dockerfile`, el `.dockerignore`, el servicio de systemd y las reglas de Maven del `.gitignore`. Sigue en el historial de git |
+| `docker-compose.yml` | Borrado: PostgreSQL y Mailpit solo servían al backend Java |
+| `tp2/` | La plantilla de CloudFormation, su diagrama y el runbook (`infra/README.md`), movidos tal cual, con una nota arriba que dice qué son |
+| Frontend | Fuera lo que solo funcionaba contra Java: el default `localhost:8080`, los streams SSE con `EventSource` y el bloque de cuentas de demo del login (`owner@demo.q`, que ya no existe en ningún lado) |
+| Documentación | README, `architecture.md`, `deployment.md` y `HANDOFF.md` reescritos; `api-reference.md`, `domain-model.md`, `gotchas.md` y `frontend.md` puestos al día |
+
+### Decisiones que se apartan del roadmap
+
+| Decisión | Por qué |
+|---|---|
+| **No hay API local; el frontend se desarrolla contra la del lab.** `next dev` hace de proxy de `/api/v1` y `config.json` hacia el sitio desplegado (`DEV_API_URL` en `.env.local`) | El roadmap pedía DynamoDB Local para desarrollo, pero los tests ya levantan el suyo con Testcontainers, y un servidor local de la API sería código nuevo (más un login falso, porque el navegador inicia sesión con Cognito). La API desplegada no tiene CORS porque sirve el sitio: con el proxy, el navegador solo habla con localhost, igual que en producción. Los ids de Cognito y el WebSocket salen del mismo `config.json`, así que también hay tiempo real |
+| **El desarrollo local ya estaba roto** | El frontend inicia sesión con Cognito y el backend Java solo aceptaba sus propios tokens: con el backend levantado, el panel no funcionaba |
+| **Se borró el bloque de demo del login** en lugar de apuntarlo al usuario de Terraform | Ese usuario tiene una contraseña aleatoria por despliegue: no hay nada fijo que mostrar, y una contraseña fija estaría en un repositorio público |
+| **Los documentos se reescribieron**, no se movieron a `tp2/` | Decisión del equipo. Las versiones del TP2 quedan en el historial de git |
+| `docs/` sigue en inglés | Como el resto de esos documentos y el README. ROADMAP, AVANCE y el código siguen en castellano |
+
+### Verificado localmente
+
+- typecheck, lint y build del frontend como en el pipeline (`/prod`), sin rastros de `localhost:8080`
+  ni de las cuentas de demo en `out/`.
+- El proxy de `next dev` contra una API falsa: GET y POST llegan con el `Host` del destino, el
+  `Authorization` y el cuerpo; `config.json` también; `/login` y `/login/` cargan.
+- La búsqueda de referencias al sistema anterior fuera de `tp2/`, `functions/` y los documentos de
+  planificación: lo que queda está en pasado o explica los límites del lab.
+- Todos los links relativos de los documentos apuntan a algo que existe.
+
+### Falta, en el lab
+
+- Borrar lo que quedó del TP2 en la cuenta (el stack, RDS, el balanceador, el Auto Scaling Group, el
+  NAT Gateway) y el `app.env` del bucket de artefactos del TP2.
+- **Revocar la contraseña de aplicación de Gmail** que estaba en ese `app.env`, y rotar la de RDS si
+  la base sigue existiendo.
+
