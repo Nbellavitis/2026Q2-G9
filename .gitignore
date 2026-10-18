@@ -1,10 +1,3 @@
-# Java / Maven
-target/
-*.class
-*.jar
-!.mvn/wrapper/maven-wrapper.jar
-.mvn/timing.properties
-
 # IDE
 .idea/
 *.iml
@@ -17,14 +10,11 @@ target/
 # OS
 .DS_Store
 
-# Node / Next (frontend, later)
+# Node / Next
 node_modules/
 .next/
 out/
 .env*.local
-
-# Local config
-backend/src/main/resources/application-local.yml
 
 # Local tooling
 .claude/
