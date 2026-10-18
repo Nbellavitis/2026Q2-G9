@@ -5,14 +5,14 @@
  *
  * The Cognito ids only exist after `terraform apply`, but the site is built before it - so they
  * cannot be baked into the bundle. Terraform writes them to `config.json` next to the site, and this
- * reads it once per page load. In development there is no such file: the same values come from
- * `NEXT_PUBLIC_COGNITO_*` in `.env.local`.
+ * reads it once per page load. In development `next dev` proxies the same file from the deployed
+ * site, so both read the same values.
  */
 export interface RuntimeConfig {
   region: string
   userPoolId: string
   userPoolClientId: string
-  /** The realtime WebSocket. Absent in development, where the local backend streams over SSE. */
+  /** The realtime WebSocket. Without it the live views fall back to polling. */
   websocketUrl?: string
 }
 
@@ -28,15 +28,6 @@ export function loadRuntimeConfig(): Promise<RuntimeConfig> {
 }
 
 async function fetchConfig(): Promise<RuntimeConfig> {
-  const fromEnv = {
-    region: process.env.NEXT_PUBLIC_COGNITO_REGION,
-    userPoolId: process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID,
-    userPoolClientId: process.env.NEXT_PUBLIC_COGNITO_CLIENT_ID,
-  }
-  if (fromEnv.region && fromEnv.userPoolId && fromEnv.userPoolClientId) {
-    return fromEnv as RuntimeConfig
-  }
-
   const response = await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}/config.json`, { cache: 'no-store' })
   if (!response.ok) throw new Error(`config.json answered ${response.status}`)
   return (await response.json()) as RuntimeConfig

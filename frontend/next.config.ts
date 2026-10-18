@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next'
+import { PHASE_DEVELOPMENT_SERVER } from 'next/constants'
 
 /**
  * The app ships as a pure static SPA: `next build` writes `out/`, which is served straight from an
@@ -26,4 +27,32 @@ const nextConfig: NextConfig = {
   images: { unoptimized: true },
 }
 
-export default nextConfig
+/**
+ * There is no local API: `next dev` runs against the one deployed in the lab. The deployed API
+ * answers only its own origin (it serves the site, so it needs no CORS), so the browser cannot call
+ * it from localhost. Instead the dev server proxies the API and `config.json` from the deployed
+ * site, and the browser only ever talks to localhost - the same shape as in production.
+ *
+ * `DEV_API_URL` is the `site_url` output of Terraform, in `.env.local`. Only `next dev` reads it;
+ * `next build` gets the plain config above.
+ */
+function developmentConfig(): NextConfig {
+  const deployed = process.env.DEV_API_URL?.replace(/\/$/, '')
+  if (!deployed) {
+    throw new Error('Set DEV_API_URL in frontend/.env.local to the site_url output of Terraform (see .env.example).')
+  }
+  return {
+    ...nextConfig,
+    // With `trailingSlash`, Next would answer `/api/v1/health` with a redirect to `/api/v1/health/`,
+    // a path the API does not have.
+    skipTrailingSlashRedirect: true,
+    rewrites: async () => [
+      { source: '/api/v1/:path*', destination: `${deployed}/api/v1/:path*` },
+      { source: '/config.json', destination: `${deployed}/config.json` },
+    ],
+  }
+}
+
+export default function config(phase: string): NextConfig {
+  return phase === PHASE_DEVELOPMENT_SERVER ? developmentConfig() : nextConfig
+}

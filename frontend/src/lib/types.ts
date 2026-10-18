@@ -1,5 +1,5 @@
 /**
- * Mirrors the read models the Spring API returns.
+ * Mirrors the read models the API returns.
  *
  * The backend serialises with non-null inclusion, so any field the server may omit is optional here.
  * That is not defensive typing for its own sake: `position` really is absent once a customer has been

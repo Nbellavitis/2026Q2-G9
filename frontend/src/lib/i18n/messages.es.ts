@@ -400,10 +400,6 @@ export const es: Record<MessageKey, string> = {
   'board.updated': 'Tablero actualizado: {waiting} esperando, {serving} en atención.',
   'settings.appliesImmediately': 'Lo que cambies acá se aplica al instante, no hace falta guardar.',
   'settings.needsSaving': 'Tenés cambios sin guardar.',
-  'auth.demoTitle': 'Acceso de demostración',
-  'auth.demoOwner': 'Dueño',
-  'auth.demoStaff': 'Personal',
-  'auth.demoUse': 'Usar cuenta de {role}',
 
   'error.pageTitle': 'Algo salió mal en esta página',
   'error.pageBody': 'Tu lugar en la fila está a salvo, esto es solo la pantalla. Probá de nuevo y la fila se vuelve a cargar desde el servidor.',

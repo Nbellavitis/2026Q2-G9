@@ -21,9 +21,13 @@ import type {
   TicketView,
 } from './types'
 
-export const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080').replace(/\/$/, '')
+/**
+ * The API is served from the same origin as the site, so every call is relative: `/prod` in the
+ * deployed build (the stage name API Gateway puts in front of every path), empty in development,
+ * where `next dev` proxies `/api/v1` to the deployed API (see `next.config.ts`).
+ */
+export const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/$/, '')
 const V1 = `${API_BASE}/api/v1`
-const STREAMS = process.env.NEXT_PUBLIC_STREAMS === 'sse'
 
 /** An RFC 7807 problem response, surfaced with the backend's stable `code` intact. */
 export class ApiError extends Error {
@@ -227,18 +231,6 @@ export const api = {
       const base = await websocketBase()
       return base ? `${base}?ticket=${encodeURIComponent(ticketToken)}` : null
     },
-  },
-
-  /**
-   * Server-Sent Events, only against the local Java backend (`NEXT_PUBLIC_STREAMS=sse` in
-   * `.env.development`). The serverless API has no streams: until its WebSocket exists, `null` makes
-   * the live views fall back to polling - and keeps the staff token out of a URL.
-   */
-  streams: {
-    /** EventSource cannot send headers, so the staff stream takes the token in the query string. */
-    queue: (queueId: string, token: string): string | null =>
-      STREAMS ? `${V1}/queues/${queueId}/stream?access_token=${encodeURIComponent(token)}` : null,
-    ticket: (ticketToken: string): string | null => (STREAMS ? `${V1}/public/tickets/${ticketToken}/stream` : null),
   },
 }
 

@@ -400,10 +400,6 @@ export const en = {
   'board.updated': 'Board updated: {waiting} waiting, {serving} being served.',
   'settings.appliesImmediately': 'Changes here apply immediately — no need to save.',
   'settings.needsSaving': 'You have unsaved changes.',
-  'auth.demoTitle': 'Demo access',
-  'auth.demoOwner': 'Owner',
-  'auth.demoStaff': 'Staff',
-  'auth.demoUse': 'Use {role} account',
 
   'error.pageTitle': 'Something went wrong on this page',
   'error.pageBody': 'Your place in the queue is safe — this is only the screen. Try again, and the line reloads from the server.',
