@@ -902,3 +902,30 @@ Corregidos `deployment.md`, `gotchas.md`, `architecture.md`, `domain-model.md`, 
 README, `notifications.tf` y `terraform.tfvars.example`, que daban los mails reales como posibles en
 el lab.
 
+---
+
+## Mails por el SMTP de Gmail
+
+Como el lab niega SES, el equipo decidió mandar los avisos por el SMTP de Gmail, con la cuenta del
+grupo y una contraseña de aplicación: el único secreto del sistema.
+
+| | |
+|---|---|
+| Funciones | `SmtpMailer` (`functions/src/notifications/smtp.ts`), con nodemailer 10.0.13 fijado (sin dependencias ni scripts de instalación). El notifier lo usa si el despliegue trae `SMTP_SENDER` y `SMTP_SECRET_ID`; si no, SES. Mientras el secreto no tiene valor simula, y esa falta no se guarda; una contraseña incorrecta falla, así el aviso se reintenta y termina en la DLQ con su alarma |
+| Terraform | Variable `smtp_sender_email`; el secreto `q-smtp` en Secrets Manager, **sin valor** y sin ventana de recuperación (con los 30 días por defecto, un apply después de un destroy no podría recrearlo); el notifier recibe el remitente y el ARN |
+| Pipeline | Variable del repositorio `SMTP_SENDER_EMAIL` y secret `GMAIL_APP_PASSWORD`. El paso *Contraseña SMTP* escribe el valor con la CLI **después** del apply: por Terraform quedaría en texto plano en el plan guardado, que es un artefacto descargable del workflow, y en el estado. La prueba de humo se une a la cola de demo con el propio remitente, así cada despliegue manda un mail real al buzón del grupo |
+
+Probado desde CloudShell antes de desplegar, por lo que pasó con SES:
+
+| | Resultado |
+|---|---|
+| `secretsmanager create-secret` con tags | Permitido |
+| `put-secret-value` y `delete-secret --force-delete-without-recovery` | Permitidos |
+| `simulate-principal-policy` sobre `LabRole`: `secretsmanager:GetSecretValue`, `ssm:GetParameter`, `kms:Decrypt` | `allowed` los tres |
+
+Verificado localmente: 132 tests (4 nuevos, con un transporte y un Secrets Manager falsos); el bundle
+del notifier carga (437 KB con nodemailer) y su nodemailer llega a abrir la conexión (probado contra
+un puerto cerrado); `fmt`, `validate` y actionlint sin hallazgos nuevos.
+
+Sin verificar todavía: el envío real desde Lambda a `smtp.gmail.com:465`.
+
