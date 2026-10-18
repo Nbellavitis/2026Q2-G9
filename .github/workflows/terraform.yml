@@ -156,8 +156,10 @@ jobs:
           SES_SENDER_EMAIL: ${{ vars.SES_SENDER_EMAIL }}
           SES_VERIFIED_RECIPIENTS: ${{ vars.SES_VERIFIED_RECIPIENTS }}
           ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
+          SMTP_SENDER_EMAIL: ${{ vars.SMTP_SENDER_EMAIL }}
         run: |
           if [ -n "$SES_SENDER_EMAIL" ]; then export TF_VAR_ses_sender_email="$SES_SENDER_EMAIL"; fi
+          if [ -n "$SMTP_SENDER_EMAIL" ]; then export TF_VAR_smtp_sender_email="$SMTP_SENDER_EMAIL"; fi
           if [ -n "$ALERT_EMAIL" ]; then export TF_VAR_email_alertas="$ALERT_EMAIL"; fi
           # Separadas por coma, como las escribe una persona: Terraform recibe la lista en JSON.
           if [ -n "$SES_VERIFIED_RECIPIENTS" ]; then
@@ -278,6 +280,25 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: terraform apply -input=false -no-color -lock-timeout=10m tfplan
 
+      # La contraseña de aplicación de Gmail va directo a Secrets Manager con la CLI: si pasara por
+      # Terraform quedaría en texto plano dentro del plan guardado, que es un artefacto descargable
+      # del workflow, y en el estado. GitHub la enmascara en los logs.
+      - name: Contraseña SMTP
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: |
+          secret_id=$(terraform output -raw smtp_secret_id 2>/dev/null || true)
+          if [ -z "$secret_id" ] || [ "$secret_id" = "null" ]; then
+            echo "Sin SMTP_SENDER_EMAIL: los avisos se simulan"
+          elif [ -z "$GMAIL_APP_PASSWORD" ]; then
+            echo "::warning::Hay SMTP_SENDER_EMAIL pero no el secret GMAIL_APP_PASSWORD: los avisos se simulan"
+          else
+            aws secretsmanager put-secret-value --secret-id "$secret_id" \
+              --secret-string "$GMAIL_APP_PASSWORD" --output text --query VersionId >/dev/null
+            echo "Contraseña SMTP cargada en Secrets Manager"
+          fi
+
       - name: Prueba de humo
         working-directory: ${{ env.TF_DIR }}
         run: |
@@ -307,8 +328,13 @@ jobs:
           demo=$(terraform output -raw demo_queue_url 2>/dev/null || true)
           if [ -n "$demo" ]; then
             queue_id="${demo##*id=}"
+            # Con el SMTP de Gmail los avisos salen de verdad: la prueba se anota con el propio
+            # remitente, así el mail llega al buzón del grupo en lugar de rebotar.
+            email=$(terraform output -raw smtp_sender_email 2>/dev/null || true)
+            if [ -z "$email" ] || [ "$email" = "null" ]; then email=humo@queue.example; fi
+            body=$(jq -cn --arg email "$email" '{name: "Prueba de humo", email: $email, partySize: 2, locale: "es"}')
             status=$(curl -sS -o join.json -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
-              -d '{"name":"Prueba de humo","email":"humo@queue.example","partySize":2,"locale":"es"}' \
+              -d "$body" \
               "${api}/public/queues/${queue_id}/entries")
             [ "$status" = "201" ] || { echo "Unirse a la cola de demo respondió $status"; cat join.json; exit 1; }
             token=$(jq -r .ticketToken join.json)

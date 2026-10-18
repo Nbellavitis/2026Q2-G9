@@ -169,6 +169,17 @@ variable "ses_sender_email" {
   }
 }
 
+variable "smtp_sender_email" {
+  description = "Cuenta de Gmail que manda los avisos por SMTP, en lugar de SES (que el Learner Lab niega). Su contraseña de aplicación la carga el pipeline en Secrets Manager. null deja los avisos simulados."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.smtp_sender_email == null || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.smtp_sender_email))
+    error_message = "smtp_sender_email tiene que ser una dirección válida."
+  }
+}
+
 variable "ses_verified_recipients" {
   description = "Direcciones que pueden recibir avisos reales mientras la cuenta esté en el sandbox de SES (las del grupo)."
   type        = list(string)

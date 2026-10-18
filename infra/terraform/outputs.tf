@@ -64,3 +64,14 @@ output "function_names" {
     { pre_signup = module.pre_signup.name },
   )
 }
+
+output "smtp_secret_id" {
+  description = "Secreto de la contraseña SMTP, al que el pipeline le escribe el valor. null sin smtp_sender_email."
+  value       = try(aws_secretsmanager_secret.smtp[0].arn, null)
+}
+
+output "smtp_sender_email" {
+  description = "Remitente de los avisos por SMTP. La prueba de humo se une a la cola de demo con esta dirección."
+  value       = var.smtp_sender_email
+}
+

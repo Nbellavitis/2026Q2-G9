@@ -19,3 +19,19 @@ resource "aws_sesv2_email_identity" "recipients" {
 
   email_identity = each.value
 }
+
+# La alternativa a SES en el lab: el SMTP de Gmail (functions/src/notifications/smtp.ts). Terraform
+# crea el secreto vacío; el valor, la contraseña de aplicación de la cuenta, lo escribe el pipeline
+# con la CLI después del apply, así nunca queda en el plan (que es un artefacto descargable del
+# workflow) ni en el estado. Mientras no tenga valor, el notifier simula los envíos.
+resource "aws_secretsmanager_secret" "smtp" {
+  count = var.smtp_sender_email == null ? 0 : 1
+
+  name        = format("%s-smtp", var.project)
+  description = "Contraseña de aplicación de Gmail del remitente de los avisos."
+
+  # Sin ventana de recuperación: con la de 30 días por defecto, después de un destroy el nombre queda
+  # reservado y el apply siguiente falla al crearlo.
+  recovery_window_in_days = 0
+}
+

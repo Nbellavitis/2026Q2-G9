@@ -119,15 +119,17 @@ locals {
         SITE_URL          = local.site_url
       }
     }
-    # Consume q-notifications y manda los avisos por SES.
+    # Consume q-notifications y manda los avisos por el SMTP de Gmail o por SES.
     notifier = {
       description = "Decide qué avisos corresponden y los manda por email, una sola vez cada uno."
       memory_size = 256
       timeout     = local.consumers.notifier.timeout
       environment = {
-        TABLE_NAME   = module.main_table.dynamodb_table_id
-        SENDER_EMAIL = var.ses_sender_email == null ? "" : var.ses_sender_email
-        SITE_URL     = local.site_url
+        TABLE_NAME     = module.main_table.dynamodb_table_id
+        SENDER_EMAIL   = var.ses_sender_email == null ? "" : var.ses_sender_email
+        SMTP_SENDER    = var.smtp_sender_email == null ? "" : var.smtp_sender_email
+        SMTP_SECRET_ID = try(aws_secretsmanager_secret.smtp[0].arn, "")
+        SITE_URL       = local.site_url
       }
     }
     # Consume q-lifecycle: gracias vencidas y cierres de cola.
