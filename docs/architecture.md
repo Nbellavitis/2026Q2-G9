@@ -57,7 +57,8 @@ flowchart LR
     lifecycleq --> lifecycle[λ lifecycle]
 
     broadcaster -->|post to connection| ws
-    notifier --> ses[SES]
+    notifier -->|SMTP over TLS| gmail[Gmail]
+    notifier -.->|reads the app password| secrets[(Secrets Manager)]
     lifecycle --> main
 ```
 
@@ -81,11 +82,12 @@ Two paths, and the line between them is the DynamoDB transaction:
 | DynamoDB Streams | The source of every asynchronous action | Fires only for committed writes, in order per partition |
 | SNS FIFO + SQS | Fan-out, filtering and buffering per consumer | Each consumer gets its own queue, retries, DLQ and concurrency limit |
 | Cognito | Staff accounts | Removes the hand-rolled login, password hashing and the JWT secret; API Gateway validates tokens without running a Lambda |
-| SES | Notification emails | Authenticated with IAM, no SMTP password to store |
+| Gmail SMTP | Notification emails | The lab denies SES to every role. Gmail's SMTP server delivers to any address, with the group's account and an app password |
+| Secrets Manager | That app password, the only secret | Encrypted at rest and read with the lab's role; the pipeline writes the value, so it is in no file, plan or state |
 | S3 | The site, the function bundles, and the access logs of both | Three private buckets, as the TP2's correction asked |
 | CloudWatch | Logs of every function, alarms on every DLQ, on the push queue's age and on the stream's failures | Built in; the alarms publish to an SNS topic |
 
-**There is no VPC.** Nothing in the design needs one: DynamoDB, SNS, SQS, SES and Cognito are
+**There is no VPC.** Nothing in the design needs one: DynamoDB, SNS, SQS, Secrets Manager and Cognito are
 reached over AWS's public endpoints with IAM, and there is no database instance or server to
 isolate. A VPC would add NAT cost and cold-start latency for no protection the IAM boundary does not
 already give.
@@ -147,7 +149,7 @@ release reaches the notifier, which tells each customer the queue closed.
 | `ws-connections` | API Gateway WebSocket `$connect`, `$disconnect` | Validates the customer's ticket or the staff member's one-time ticket, and records the connection |
 | `stream-publisher` | DynamoDB Streams on `q-main`, filtered to new event items | Publishes each event to SNS; schedules grace expiry and queue release on `q-lifecycle` |
 | `broadcaster` | SQS FIFO `q-push` | Pushes the current board and tickets to the connections watching a queue |
-| `notifier` | SQS `q-notifications` | Decides which notifications are due and sends them through SES, once each (simulated in the Learner Lab, which denies SES) |
+| `notifier` | SQS `q-notifications` | Decides which notifications are due and sends them, once each: through Gmail's SMTP server in the Learner Lab, which denies SES |
 | `lifecycle` | SQS `q-lifecycle` | Applies due grace periods and releases closed queues in batches |
 | `seed` | Invoked by Terraform on apply | Loads the demo establishment, queues and lanes, idempotently |
 | `cognito-pre-signup` | Cognito pre sign-up | Confirms new accounts on the spot, so sign-up has no code step |
@@ -157,7 +159,7 @@ The split follows two cuts, and only two:
 * **By trigger, which the platform imposes.** API Gateway is synchronous and does not retry; a
   stream blocks its shard until a batch succeeds; an SQS queue retries per message and needs its own
   visibility timeout and DLQ. Mixing two sources in one function means configuring for the worse of
-  the two and coupling their failures: if SES is down, the notifier's retries must not stop the push.
+  the two and coupling their failures: if email is down, the notifier's retries must not stop the push.
   So each queue has its own consumer.
 * **By audience, inside the API.** Customers are anonymous, arrive in bursts when a QR is scanned,
   and only need a handful of routes; staff are few, authenticated, and use everything. Different
@@ -291,12 +293,19 @@ the establishment that owns the queue or entry **it read** — never of an id th
 every request. Removing someone takes effect on their next request, not their next sign-in. Owners
 configure; staff operate.
 
-### 8.3 No secrets
+### 8.3 One secret
 
-Cognito replaced the JWT secret and password hashing. DynamoDB, SNS, SQS and SES are reached with the
-lab's IAM role. There is no database password, no SMTP password and no API key anywhere — in the
-repository, in Terraform, or in the functions' environment. The only credentials are the lab's
-session keys, which live in the repository's GitHub secrets.
+Cognito replaced the JWT secret and password hashing. DynamoDB, SNS, SQS and Secrets Manager are
+reached with the lab's IAM role. There is no database password and no API key.
+
+There is one secret, forced by the lab: because it denies SES, emails go through Gmail's SMTP server,
+which needs an app password of the group's account. It is treated as the TP2's correction asked
+("falta encriptar"): it lives only in a GitHub secret and, encrypted at rest, in Secrets Manager.
+Terraform creates the secret empty and the Apply job writes the value with the AWS CLI after the
+apply, because a value set through Terraform would be in plain text in the saved plan (a
+downloadable workflow artifact) and in the state. The notifier reads it when it sends, and it only
+travels over TLS. Besides it, the only credentials are the lab's session keys, also in GitHub
+secrets.
 
 ### 8.4 Abuse limits
 
@@ -353,10 +362,11 @@ translation is a compile error.
 
 ## 11. Testing strategy
 
-**128 tests, in two tiers**, run on every push by the pipeline:
+**132 tests, in two tiers**, run on every push by the pipeline:
 
-* **Unit** (`functions/test/domain`) — the pure rules: ordering keys, the selector, estimation,
-  lanes, requeue, metrics. Fast and exhaustive.
+* **Unit** (`functions/test/domain`, `handlers`, `notifications`) — the pure rules: ordering keys,
+  the selector, estimation, lanes, requeue, metrics; plus the stream publisher and the Gmail mailer
+  with fake clients. Fast and exhaustive.
 * **Integration** (`functions/test/integration`) — the handlers end to end with API Gateway events
   built by hand, the stores, the stream consumers, and the races, all against a real DynamoDB Local
   started by Testcontainers. Real because the conditional transactions, the key order and the stream
@@ -395,7 +405,7 @@ creating one. Procedure in [deployment.md](deployment.md).
 | Live updates | API Gateway WebSocket | Server-Sent Events: need a process holding the connection. Polling alone: slower and more invocations |
 | Staff auth | Cognito, validated by API Gateway | A Lambda authorizer and our own JWT: a secret to store, password hashing to maintain, and an invocation for every request the cache misses |
 | Staff sign-in | Our own form, `USER_PASSWORD_AUTH` against Cognito | The hosted UI with a `/callback` Lambda (the workaround from class): it solves an HTTP site needing an HTTPS redirect, and ours is already HTTPS with no redirect at all (§8.1) |
-| Channels | Email through SES only, simulated in the Learner Lab | Web Push, which the design proposed: a service worker and VAPID keys. SMS: sandboxed. Gmail over SMTP from the notifier: would deliver, at the price of an app password to keep as a secret |
+| Channels | Email, through Gmail's SMTP server in the Learner Lab (SES where allowed) | SES alone: the lab denies it to every role, so nothing would be delivered. Web Push, which the design proposed: a service worker and VAPID keys. SMS: sandboxed |
 | Serving the site | API Gateway from a private S3 bucket | CloudFront: blocked in the lab. S3 website hosting: needs a public bucket, and plain HTTP |
 | Grace expiry | Delayed SQS message, plus lazy on read and write | Only lazy (the read path): a queue nobody looks at would never move. Only the timer: a page could show a call the clock already invalidated |
 | Bucket creation | The pipeline, with the AWS CLI | `aws_s3_bucket`: fails in the lab, the SCP denies a read the provider makes after creating it |
@@ -407,9 +417,9 @@ creating one. Procedure in [deployment.md](deployment.md).
 
 * **The lab's credentials expire** with each session and have to be loaded into the secrets by hand.
   A normal account would use an OIDC role, which the lab cannot create.
-* **Customer emails are simulated in the Learner Lab.** The lab denies SES to every role, so the
-  notifier logs each email instead of sending it. In an account that allows SES, setting a sender and
-  verified recipients turns them into real emails.
+* **Emails depend on a Gmail account.** The lab denies SES, so they go out through Gmail's SMTP
+  server: subject to Gmail's daily limit for a personal account, with bounces landing in the group's
+  inbox, and simulated in the notifier's log if the account is not configured.
 * **No SMS.** A customer who leaves only a phone number gets no notifications.
 * **Every deployment changes the site**: the Next.js build ID is random, so about 75 objects are
   re-uploaded, and the REST API redeployed, even when the frontend did not change.

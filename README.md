@@ -20,7 +20,7 @@ the TP2; [`AVANCE-ENTREGA-3.md`](AVANCE-ENTREGA-3.md) has where each phase stand
 |---|---|
 | **1. Acceso e ingreso mediante QR** | `GET /public/queues/{id}/qr` renders the code; `POST /public/queues/{id}/entries` joins with a name plus one contact channel. |
 | **2. Seguimiento de la espera** | `GET /public/tickets/{token}`, then pushed over the WebSocket: position, people ahead, estimated wait, recomputed on every movement. |
-| **3. Notificaciones del turno** | Configurable proximity thresholds (by position and by minutes), the "it's your turn" alert, and an audited notification history, by email through SES. The Learner Lab denies SES, so there each email is written to the notifier's log instead. |
+| **3. Notificaciones del turno** | Configurable proximity thresholds (by position and by minutes), the "it's your turn" alert, and an audited notification history, by email. In the Learner Lab the emails go out through Gmail's SMTP server, because the lab denies SES (see [Notification emails](#notification-emails)). |
 | **4. Gestion de la fila por el comercio** | Staff board, call / serve / no-show / cancel, pause and resume, lanes by party size, and queue + establishment metrics. |
 | **5. Abandono y periodo de gracia** | `DELETE /public/tickets/{token}` frees the place; a configurable grace period plus four no-show policies decide what happens to someone who does not show up. |
 | **Idiomas** | English and Spanish, following the browser. The locale is stored with the entry, so notification emails arrive in the same language as the page the customer joined from. |
@@ -31,7 +31,8 @@ the TP2; [`AVANCE-ENTREGA-3.md`](AVANCE-ENTREGA-3.md) has where each phase stand
 Vitest with Testcontainers (DynamoDB Local).
 
 **AWS** — API Gateway (REST for the site and the API, WebSocket for live updates), Lambda, DynamoDB
-(single table plus a connections table, Streams), Cognito, SNS FIFO, SQS, SES, S3, CloudWatch.
+(single table plus a connections table, Streams), Cognito, SNS FIFO, SQS, Secrets Manager, S3,
+CloudWatch. Notification emails through Gmail's SMTP server (SES where the account allows it).
 
 **Infrastructure** — Terraform, run only from GitHub Actions: plan on every push to the pull
 request, apply after an approval, destroy with a label.
@@ -82,6 +83,35 @@ an AWS Academy Learner Lab account. In short: load the lab's credentials into th
 push, approve the `aws-lab` environment, read the URL in the run summary. Destroy by adding the
 `destroy` label. The full procedure is in [docs/deployment.md](docs/deployment.md).
 
+### Notification emails
+
+**The Learner Lab denies SES.** Neither the role the pipeline uses nor `LabRole`, the functions'
+role, may verify an address or send (an explicit deny on `ses:SendEmail`, `ses:CreateEmailIdentity`
+and `ses:VerifyEmailIdentity`), so SES cannot deliver anything from the lab.
+
+**The workaround is Gmail's SMTP server.** The notifier sends from the group's Gmail account over TLS
+(`smtp.gmail.com:465`) with an app password of that account, so emails reach any address, with no
+sandbox. To turn it on:
+
+| Where | Name | Value |
+|---|---|---|
+| Repository variable | `SMTP_SENDER_EMAIL` | The Gmail address emails are sent from |
+| Repository secret | `GMAIL_APP_PASSWORD` | An [app password](https://support.google.com/accounts/answer/185833) of that account (it needs 2-Step Verification). Unlike the lab's keys, it does not expire with the session |
+
+With neither set, notifications are simulated: the notifier writes each email to its CloudWatch log,
+which the assignment allows.
+
+**It brings back one secret**, the thing the TP2's correction flagged ("falta encriptar"), so it is
+handled accordingly: the password lives only in the GitHub secret and, encrypted at rest, in Secrets
+Manager. Terraform creates the secret empty; the Apply job writes the value with the AWS CLI after
+`terraform apply`, so the password is never in a file, in the repository, in the Terraform plan (a
+downloadable workflow artifact) or in its state. The notifier reads it at send time, and Gmail only
+sees it over TLS.
+
+Limits: Gmail caps how many emails a personal account sends per day, and bounces land in the
+group's inbox. The smoke test joins the demo queue with the sender's own
+address, so every deployment sends one real email to that inbox.
+
 ## Running the frontend locally
 
 There is no local API: `npm run dev` runs the site against the one deployed in the lab, through a
@@ -107,9 +137,9 @@ every deployment: `terraform output -raw demo_staff_password`, or register a new
 cd functions && npm install && npm test
 ```
 
-128 tests: unit tests for the domain rules (ordering, estimation, lanes, the selector, metrics) and
-integration tests that run the handlers, the stores, the stream consumers and the races against a
-real DynamoDB Local through Testcontainers, so **Docker must be running**. `npm run test:unit` runs
+132 tests: unit tests for the domain rules (ordering, estimation, lanes, the selector, metrics) and
+the Gmail mailer, and integration tests that run the handlers, the stores, the stream consumers and
+the races against a real DynamoDB Local through Testcontainers, so **Docker must be running**. `npm run test:unit` runs
 only the first group. The pipeline runs all of them on every push, and after every apply a smoke test
 joins the demo queue and checks that the WebSocket push arrives.
 
@@ -129,8 +159,10 @@ joins the demo queue and checks that the WebSocket push arrives.
   the queue moves, and duplicates or late events change nothing.
 * **Grace expiry is evaluated on a timer and on every read and write**, so state is never stale on
   read and a queue nobody is watching still moves. The first one to apply it wins.
-* **No secrets anywhere.** Cognito replaced the hand-rolled JWT, and DynamoDB, SES, SNS and SQS are
-  reached with the lab's IAM role.
+* **One secret, and only where SES is missing.** Cognito replaced the hand-rolled JWT, and
+  DynamoDB, SNS, SQS and Secrets Manager are reached with the lab's IAM role. The only secret is the
+  Gmail app password the lab's lack of SES forces, kept out of Terraform (see
+  [Notification emails](#notification-emails)).
 
 ## Documentation
 

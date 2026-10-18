@@ -204,11 +204,11 @@ pass through the line**, however many times the queue moves. When a customer is 
 `WAITING` after a no-show, the cycle advances and the alerts become eligible again - a second call
 really does produce a second "it's your turn".
 
-Notifications go by email through SES, and only to the email: a customer who left just a phone
-number has no channel (there is no SMS). A failed send is recorded on the item and retried, up to 5
-attempts; it never undoes a queue movement. The Learner Lab denies SES entirely, so there no sender is
-configured and every email is written to the function's log instead, recorded as channel `LOG`. With
-a sender in an account that allows SES, an address SES's sandbox rejects falls back the same way.
+Notifications go by email, and only to the email: a customer who left just a phone number has no
+channel (there is no SMS). The Learner Lab denies SES, so they go through Gmail's SMTP server from
+the group's account ([`smtp.ts`](../functions/src/notifications/smtp.ts)); without that account
+configured, every email is written to the function's log instead and recorded as channel `LOG`. A
+failed send is recorded on the item and retried, up to 5 attempts; it never undoes a queue movement.
 
 ## Metrics
 

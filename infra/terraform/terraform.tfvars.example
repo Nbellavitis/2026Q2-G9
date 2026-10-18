@@ -12,10 +12,11 @@
 # api_throttle_burst_limit    = 50
 # joins_per_minute            = 60
 
-# Mails. En el pipeline salen de las variables del repositorio SES_SENDER_EMAIL,
-# SES_VERIFIED_RECIPIENTS y ALERT_EMAIL, y cada dirección tiene que confirmar el link que manda AWS
-# después del apply. En el Learner Lab solo sirve ALERT_EMAIL (es SNS): el lab niega SES, y con las
-# otras dos el apply falla al crear las identidades.
+# Mails. En el pipeline salen de variables del repositorio. En el Learner Lab, que niega SES, sirven
+# SMTP_SENDER_EMAIL (el SMTP de Gmail; su contraseña de aplicación va en el secret GMAIL_APP_PASSWORD,
+# nunca acá) y ALERT_EMAIL (es SNS). SES_SENDER_EMAIL y SES_VERIFIED_RECIPIENTS son para una cuenta
+# con SES: en el lab, el apply falla al crear las identidades.
+# smtp_sender_email       = "queue.cloud.itba@gmail.com"
+# email_alertas           = "queue.cloud.itba@gmail.com"
 # ses_sender_email        = "queue.cloud.itba@gmail.com"
 # ses_verified_recipients = ["integrante@gmail.com"]
-# email_alertas           = "queue.cloud.itba@gmail.com"

@@ -72,7 +72,7 @@ buckets.
 | Data | DynamoDB: `q-main` (single table, Streams, PITR, TTL) and `q-connections` |
 | Events | DynamoDB Streams → `stream-publisher` → SNS FIFO → SQS (`push` FIFO, `notifications` filtered, `lifecycle` delayed), each with a DLQ and alarms |
 | Identity | Cognito user pool for staff; customers are anonymous, authorised by their ticket token |
-| Email | SES, denied in the Learner Lab: emails are simulated (written to the notifier's log) |
+| Email | Gmail's SMTP server, with the group's account; its app password in Secrets Manager. SES is denied in the Learner Lab |
 | Infrastructure | Terraform 1.16, AWS provider 6.67, one external module (`terraform-aws-modules/dynamodb-table` 5.5.2) and three of our own (`private-bucket`, `lambda-function`, `queue-with-dlq`) |
 | Pipeline | GitHub Actions on the pull request: validate, build, plan; apply after approving `aws-lab`; destroy with the `destroy` label |
 | Frontend | Next.js 16 static export, React 19, Tailwind 4 |
@@ -106,7 +106,7 @@ push to `entrega-3`, approve the apply, read the URLs in the run summary.
 cd functions && npm install && npm test
 ```
 
-128 tests, with Docker running (DynamoDB Local through Testcontainers). `npm run typecheck` and
+132 tests, with Docker running (DynamoDB Local through Testcontainers). `npm run typecheck` and
 `npm run build` too; the build writes one bundle per handler to `functions/dist/`.
 
 **Frontend:**
@@ -138,8 +138,8 @@ cd infra/terraform && terraform fmt -check -recursive && terraform init -backend
 * **Consumers re-read state instead of trusting events.** Duplicates and reordering cost at most an
   extra push, never a wrong screen or a second email.
 * **The lab's limits shaped the deployment.** No IAM roles (everything uses `LabRole`), no
-  CloudFront (API Gateway serves the site), and an SCP that keeps Terraform from creating S3 buckets
-  (the pipeline creates them).
+  CloudFront (API Gateway serves the site), an SCP that keeps Terraform from creating S3 buckets
+  (the pipeline creates them), and no SES (emails go through Gmail's SMTP server, the one secret).
 
 ---
 

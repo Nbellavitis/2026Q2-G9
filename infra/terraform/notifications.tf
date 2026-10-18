@@ -1,6 +1,6 @@
 # SES para los avisos a clientes. **El Learner Lab lo niega entero**: ni el rol del pipeline ni LabRole
 # pueden crear o verificar una identidad, ni mandar. En el lab, ses_sender_email queda en null y los
-# avisos se simulan. En una cuenta con SES (que empieza en el sandbox: solo manda desde y hacia
+# avisos salen por el SMTP de Gmail (el secreto de abajo), o se simulan si no hay remitente. En una cuenta con SES (que empieza en el sandbox: solo manda desde y hacia
 # direcciones verificadas), crear una identidad le manda a esa dirección un email de AWS con un link
 # que hay que abrir.
 #
