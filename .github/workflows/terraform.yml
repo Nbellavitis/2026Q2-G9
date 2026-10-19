@@ -324,6 +324,18 @@ jobs:
           curl -fsS "${site}config.json" | jq -e '.userPoolId and .userPoolClientId' >/dev/null \
             || { echo "config.json no tiene los ids de Cognito"; exit 1; }
 
+          # Un mapping del stream recién creado tarda minutos en empezar a leer. Lee desde TRIM_HORIZON,
+          # así que no pierde nada, pero el push de abajo llegaría tarde. Se espera a que procese su
+          # primer lote (la carga de demo escribe eventos en el apply); si ya venía leyendo, pasa
+          # enseguida. Pasados 5 minutos se sigue igual y decide la prueba del WebSocket.
+          mapping=$(terraform output -raw stream_mapping_uuid)
+          for attempt in $(seq 1 30); do
+            result=$(aws lambda get-event-source-mapping --uuid "$mapping" --query LastProcessingResult --output text)
+            if [ "$result" != "No records processed" ]; then echo "Stream: $result"; break; fi
+            if [ "$attempt" -eq 30 ]; then echo "::warning::El stream todavía no procesó nada después de 5 minutos"; fi
+            sleep 10
+          done
+
           # El recorrido de un cliente en la cola de demo: unirse, ver su ticket e irse.
           demo=$(terraform output -raw demo_queue_url 2>/dev/null || true)
           if [ -n "$demo" ]; then

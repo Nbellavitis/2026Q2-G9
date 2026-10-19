@@ -91,6 +91,8 @@ After the apply, against the deployed URLs:
 * the home page and `/login/` return HTML, and a path that does not exist returns the site's 404
   page, not S3's XML;
 * `config.json` has the Cognito ids;
+* the table's stream trigger has processed its first batch — a new trigger takes minutes to start
+  reading, so on a fresh deployment this waits, for up to 5 minutes;
 * a customer joins the demo queue, their ticket is `WAITING`, and leaving with the WebSocket open
   delivers the push (`.github/scripts/smoke-realtime.mjs`).
 

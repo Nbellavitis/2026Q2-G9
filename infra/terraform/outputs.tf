@@ -75,3 +75,8 @@ output "smtp_sender_email" {
   value       = var.smtp_sender_email
 }
 
+output "stream_mapping_uuid" {
+  description = "El mapping del stream de q-main. La prueba de humo espera a que procese su primer lote."
+  value       = aws_lambda_event_source_mapping.stream.uuid
+}
+
