@@ -943,3 +943,9 @@ la prueba de humo entera. Los applies que solo actualizaban pasaban porque el ma
 Arreglo: `TRIM_HORIZON`, que lee desde lo más viejo que retiene el stream; releer al crearlo es
 inofensivo porque los consumidores deciden con el estado actual.
 
+**Resultado.** Con `TRIM_HORIZON` y la espera, la ejecución
+[39180411198](https://github.com/josebl123/tp-cloud/actions/runs/39180411198) pasó entera: el apply
+reemplazó el mapping, la contraseña quedó cargada, la prueba de humo esperó a `Stream: OK` y recibió
+el push del WebSocket. **El mail real llegó**: un ingreso a la cola de demo desde el sitio desplegado
+mandó "Ya tenés tu lugar en Mesas" desde `queue.cloud.itba@gmail.com` por el SMTP de Gmail.
+
