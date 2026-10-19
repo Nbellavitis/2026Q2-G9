@@ -929,3 +929,17 @@ un puerto cerrado); `fmt`, `validate` y actionlint sin hallazgos nuevos.
 
 Sin verificar todavía: el envío real desde Lambda a `smtp.gmail.com:465`.
 
+### Primer despliegue con SMTP: el stream perdió los eventos
+
+Ejecución [39178976184](https://github.com/josebl123/tp-cloud/actions/runs/39178976184), desde
+cero: 202 recursos creados y la contraseña cargada en Secrets Manager, pero la prueba de humo no
+recibió el push por WebSocket y tampoco llegó el mail del ingreso. En CloudShell, los tres mappings
+(`stream-publisher`, `broadcaster`, `notifier`) estaban `Enabled`, las colas vacías y **ninguna de
+las tres funciones tenía invocaciones**: ningún evento salió del stream.
+
+Causa: el mapping del stream empezaba en `LATEST`. Recién creado tarda unos minutos en empezar a
+leer, y con `LATEST` lo escrito en ese rato se saltea: en un despliegue desde cero, la carga de demo y
+la prueba de humo entera. Los applies que solo actualizaban pasaban porque el mapping ya existía.
+Arreglo: `TRIM_HORIZON`, que lee desde lo más viejo que retiene el stream; releer al crearlo es
+inofensivo porque los consumidores deciden con el estado actual.
+

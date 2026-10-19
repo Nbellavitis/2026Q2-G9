@@ -68,7 +68,12 @@ resource "aws_lambda_event_source_mapping" "stream" {
   event_source_arn = module.main_table.dynamodb_table_stream_arn
   function_name    = module.workers["stream-publisher"].arn
 
-  starting_position                  = "LATEST"
+  # Desde el registro más viejo que retiene el stream, no desde el último. El mapping tarda unos
+  # minutos en empezar a leer después de crearse: con LATEST, lo que se escribe en ese rato se pierde,
+  # y en un despliegue desde cero eso es la carga de demo y la prueba de humo entera. Releer al crear
+  # el mapping es inofensivo: los consumidores deciden con el estado actual. Lo que pase de una hora
+  # (maximum_record_age_in_seconds) va a q-stream-failures.
+  starting_position                  = "TRIM_HORIZON"
   batch_size                         = 100
   maximum_batching_window_in_seconds = 0
   # Una ejecución por shard: el orden de los eventos de una cola se conserva, y con la concurrencia
