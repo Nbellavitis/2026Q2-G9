@@ -15,14 +15,14 @@ Terraform desde un pipeline de GitHub Actions**, en una cuenta de AWS Academy Le
 | Consigna | Sección |
 |---|---|
 | Archivos Terraform completos | [`infra/terraform/`](infra/terraform/) · [Terraform](#4-terraform) |
-| Implementación de correcciones previas | [Correcciones del TP2](#8-correcciones-del-tp2) |
+| Implementación de correcciones previas | [Correcciones del TP2](#9-correcciones-del-tp2) |
 | Mínimo un módulo propio y uno externo | [Módulos](#42-módulos) |
 | Variables y outputs | [Variables y outputs](#46-variables-y-outputs) |
 | Al menos 4 funciones | [Funciones](#43-funciones) |
 | Al menos 3 meta-argumentos | [Meta-argumentos](#44-meta-argumentos) |
 | Organización, nomenclatura y DRY | [Archivos](#41-versiones-y-archivos) · [Locals y datasources](#45-locals-y-datasources) |
 | Diagrama de arquitectura actualizado | [Arquitectura](#2-arquitectura) |
-| Guía paso a paso para ejecución | [Guía paso a paso](#6-guía-paso-a-paso) |
+| Guía paso a paso para ejecución | [Guía paso a paso](#6-guía-paso-a-paso) · [Uso de la aplicación](#7-uso-de-la-aplicación) |
 | Pipeline con init, validate, plan, apply y destroy | [Pipeline](#5-pipeline-de-github-actions) |
 
 ---
@@ -56,7 +56,7 @@ la infraestructura.
 | DynamoDB | `q-main`, tabla única con todo el negocio y Streams; `q-connections`, los sockets abiertos |
 | SNS FIFO y SQS | El bus de eventos: cada cambio de una cola se publica en orden y se reparte a tres colas, cada una con su DLQ |
 | Cognito | Cuentas del staff. API Gateway valida el token sin invocar ninguna Lambda |
-| Secrets Manager | La contraseña del SMTP de Gmail para los mails (ver [Mails](#7-mails)) |
+| Secrets Manager | La contraseña del SMTP de Gmail para los mails (ver [Mails](#8-mails)) |
 | S3 | Tres buckets privados: el sitio, el código de las Lambdas y los logs de acceso. Más el del estado de Terraform |
 | CloudWatch | Logs de las funciones y alarmas (mensajes en una DLQ, cola atrasada, fallas del stream) que avisan por SNS |
 
@@ -266,56 +266,146 @@ WebSocket.
 
 ## 6. Guía paso a paso
 
-Todo corre en GitHub Actions: no hace falta instalar nada. La
-[guía de despliegue detallada](docs/deployment.md) tiene los resultados esperados de cada paso y qué
+El despliegue está completamente automatizado con **GitHub Actions**: el pipeline compila el código,
+crea toda la infraestructura con Terraform y sube la aplicación, sin instalar nada en una máquina
+local. Para levantar la arquitectura en una cuenta de AWS Academy Learner Lab hay que seguir estos
+pasos. La [guía de despliegue detallada](docs/deployment.md) agrega los resultados esperados y qué
 hacer si algo falla.
 
-**Una sola vez, en el repositorio:**
+### Paso 1: Configurar el repositorio (una sola vez)
 
-1. *Settings → Environments*: crear `aws-lab` y agregar revisores obligatorios (sin revisores, el
-   apply corre sin esperar aprobación).
-2. *Issues → Labels*: crear la etiqueta `destroy`.
+Antes de la primera ejecución, el repositorio necesita dos elementos que el pipeline usa para
+controlar cuándo se crea y cuándo se destruye la infraestructura:
 
-**En cada sesión del Learner Lab** (las credenciales vencen con la sesión):
+1. **El environment `aws-lab`.** Ingresar a **Settings → Environments → New environment**, crear
+   `aws-lab` y, en **Required reviewers**, agregar a quienes pueden aprobar un despliegue. Los jobs
+   que crean o destruyen recursos (Apply y Destroy) corren dentro de este environment, así que
+   **esperan una aprobación manual** antes de tocar AWS. Si no se agregan revisores, corren sin esperar.
+2. **La etiqueta `destroy`.** Ingresar a **Issues → Labels → New label** y crear una etiqueta llamada
+   `destroy`. Agregarla a un pull request es lo que dispara la destrucción del stack (paso 4).
+3. **Opcional: mails reales y alarmas.** Sin esta configuración la app funciona igual y los mails a
+   los clientes se simulan: se escriben en los logs de CloudWatch. Para mandarlos de verdad, ingresar a
+   **Settings → Secrets and variables → Actions** y crear:
+   * En la pestaña **Variables**:
+     * `SMTP_SENDER_EMAIL`: la cuenta de Gmail desde la que salen los mails.
+     * `ALERT_EMAIL`: el mail que recibe las alarmas (por ejemplo, un mensaje que cayó en una DLQ).
+       AWS manda un mail de confirmación de la suscripción que hay que aceptar.
+   * En la pestaña **Secrets**:
+     * `GMAIL_APP_PASSWORD`: una [contraseña de aplicación](https://support.google.com/accounts/answer/185833)
+       de esa cuenta de Gmail (requiere la verificación en dos pasos). El pipeline la guarda en
+       Secrets Manager; nunca queda en el código ni en el estado de Terraform.
 
-3. Iniciar el lab, abrir *AWS Details* y copiar los tres valores en *Settings → Secrets and variables
-   → Actions → Secrets*: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` y `AWS_SESSION_TOKEN`.
+### Paso 2: Cargar las credenciales del Learner Lab (en cada sesión)
 
-**Desplegar:**
+El pipeline se conecta a AWS con las credenciales temporales del Learner Lab. Como **vencen al
+terminar cada sesión del lab** (unas 4 horas), este paso se repite cada vez que se inicia una sesión
+nueva:
 
-4. Abrir un pull request desde una rama **del mismo repositorio** (un PR desde un fork no recibe los
-   secrets), o hacer push a uno abierto. Si las credenciales cambiaron, *Re-run all jobs* en la
-   última ejecución.
-5. Esperar Validar, Compilar y Plan, y revisar el plan (artefacto o comentario del PR).
-6. *Review deployments → aws-lab → Approve*. El job Apply crea todo y corre la prueba de humo.
-7. El resumen del job Apply tiene la URL del sitio, la de la cola de demo y el usuario de demo.
+1. En AWS Academy, abrir el Learner Lab, presionar **Start Lab** y esperar a que el indicador quede
+   en verde.
+2. Presionar **AWS Details** y, junto a *AWS CLI*, presionar **Show**. Aparecen los tres valores de
+   la sesión.
+3. En el repositorio, ingresar a **Settings → Secrets and variables → Actions → Secrets** y crear (o
+   actualizar, si ya existen) estos secrets:
+   * `AWS_ACCESS_KEY_ID`: el identificador de la clave de acceso.
+   * `AWS_SECRET_ACCESS_KEY`: la clave de acceso secreta.
+   * `AWS_SESSION_TOKEN`: el token de la sesión temporal, obligatorio en AWS Academy.
 
-**Usar la app:**
+Los tres tienen que ser de la misma sesión. GitHub los guarda cifrados y los oculta en los logs.
 
-8. Abrir la cola de demo y anotarse como cliente; en otra ventana, registrar una cuenta de staff
-   desde el sitio (o usar la de demo, cuya contraseña se lee como explica la
-   [guía](docs/deployment.md#outputs-and-demo-credentials)) y llamar al siguiente desde el tablero.
-   El ticket del cliente se actualiza solo.
+### Paso 3: Desplegar la infraestructura y la aplicación
 
-**Destruir y volver a desplegar:**
+Con el repositorio configurado y las credenciales cargadas, el despliegue se hace desde un pull
+request:
 
-9. Cancelar cualquier apply que haya quedado esperando aprobación, agregar la etiqueta `destroy` al
-   PR y aprobar. En el log tiene que aparecer `Destroy complete!` y una línea `Vaciando y borrando:`
-   por cada bucket.
-10. Quitar la etiqueta. Para desplegar de nuevo, *Re-run all jobs* en la última ejecución del PR y
-    aprobar el apply.
+1. **Abrir un pull request** desde una rama de este mismo repositorio, o hacer push a uno que ya
+   esté abierto. Tiene que ser una rama del repositorio y no de un fork, porque GitHub no les pasa los
+   secrets a los pull requests que vienen de un fork.
+2. **El workflow `Terraform` arranca solo.** Se puede seguir desde la pestaña **Actions** o desde los
+   checks del pull request. Ejecuta, en orden:
+   * **Validar**: revisa el formato del código Terraform (`terraform fmt`), que la configuración sea
+     válida (`terraform validate`), corre los tests de Terraform y el linter (tflint). No necesita
+     credenciales de AWS.
+   * **Compilar**: corre los tests de las Lambdas, las compila y compila el sitio. Tampoco usa AWS.
+   * **Plan**: inicializa Terraform con el estado remoto en S3 (`terraform init`) y calcula qué va a
+     crear, cambiar o destruir (`terraform plan`). Guarda el plan como artefacto y deja un resumen en
+     un comentario del pull request.
+3. **Aprobar el despliegue.** Al terminar el plan, el job **Apply** queda en espera. En la ejecución,
+   presionar **Review deployments**, marcar `aws-lab` y presionar **Approve and deploy**.
+4. **El job Apply crea todo.** Ejecuta, en orden:
+   * **Creación de los buckets**: crea los tres buckets de la aplicación (`scripts/buckets.sh`), con
+     los nombres que define Terraform. El Learner Lab no deja crearlos desde Terraform (ver
+     [4.8](#48-lo-que-no-crea-terraform-y-por-qué)).
+   * **Terraform Apply**: aplica exactamente el plan aprobado. Crea las APIs, las Lambdas, las tablas,
+     las colas, Cognito y las alarmas, sube el sitio y carga los datos de demo.
+   * **Contraseña SMTP**: si se configuró en el paso 1, la guarda en Secrets Manager.
+   * **Prueba de humo**: comprueba que la API responda, que el sitio cargue, que un cliente pueda
+     anotarse en la cola de demo y que los cambios lleguen por WebSocket. Si algo falla, el job
+     termina en rojo.
+5. **Listo.** En el resumen de la ejecución (**Summary**), la sección **Desplegado** muestra la URL del
+   sitio, la de la cola de demo y el usuario de demo para empezar a usar la app (ver
+   [Uso de la aplicación](#7-uso-de-la-aplicación)).
 
-**Opcional, mails reales y alarmas** (sin esto, los mails se simulan en los logs):
+Si el plan falla porque las credenciales vencieron, cargarlas de nuevo (paso 2) y presionar **Re-run
+all jobs** en la ejecución.
 
-| Dónde | Nombre | Valor |
-|---|---|---|
-| Variable del repositorio | `SMTP_SENDER_EMAIL` | La cuenta de Gmail que manda los mails |
-| Secret del repositorio | `GMAIL_APP_PASSWORD` | Una [contraseña de aplicación](https://support.google.com/accounts/answer/185833) de esa cuenta |
-| Variable del repositorio | `ALERT_EMAIL` | Quién recibe las alarmas; hay que confirmar el mail de suscripción que manda AWS |
+### Paso 4: Destruir el stack y volver a desplegar
+
+Para eliminar toda la infraestructura y no dejar recursos consumiendo crédito en la cuenta:
+
+1. Si quedó algún apply esperando aprobación, cancelarlo con **Cancel workflow**: un apply pendiente
+   bloquea al destroy.
+2. En el pull request, agregar la etiqueta **`destroy`** y aprobar el job **Destroy** en `aws-lab`,
+   igual que en el paso 3.
+3. El job destruye todos los recursos con Terraform, vacía y borra los tres buckets y, por último,
+   borra el bucket del estado. El log termina con `Destroy complete!` y una línea `Vaciando y
+   borrando:` por cada bucket.
+4. Quitar la etiqueta `destroy` del pull request, para que no vuelva a dispararse.
+
+Para volver a desplegar, presionar **Re-run all jobs** en la última ejecución del pull request y
+aprobar el apply: el stack se crea de cero.
 
 ---
 
-## 7. Mails
+## 7. Uso de la aplicación
+
+Con la app desplegada, estos son los flujos principales. Conviene probarlos con dos ventanas: una
+como staff y otra como cliente.
+
+### Como staff
+
+1. **Crear la cuenta.** En la URL del sitio, presionar **Crear mi primera fila** y completar el nombre
+   del negocio, tu nombre, el email y una contraseña de al menos 8 caracteres. La cuenta queda activa
+   al instante, sin código de confirmación, y con el negocio creado. También se puede entrar con el
+   usuario de demo, que ya tiene un negocio con dos filas (su contraseña se lee como explica la
+   [guía de despliegue](docs/deployment.md#outputs-and-demo-credentials)).
+2. **Crear una fila.** En el panel, presionar **Nueva fila**, ponerle un nombre y presionar **Crear
+   fila**.
+3. **Imprimir el QR.** Desde la fila, abrir el QR y presionar **Imprimir esta hoja**. Es lo que el
+   cliente escanea para anotarse.
+4. **Ajustar la fila** (**Ajustes**): el período de gracia y qué pasa con quien no se presenta, cuándo
+   avisarle al cliente que se acerca su turno (por grupos por delante o por minutos de espera) y los
+   carriles por tamaño de grupo.
+5. **Atender la fila** desde el tablero, que se actualiza en vivo:
+   * **Llamar al siguiente** llama a quien corresponde, y **Llamar** a alguien en particular.
+   * **Listo** lo marca como atendido; **Ausente**, como que no se presentó. Si nadie lo marca, al
+     vencer el período de gracia se aplica la política de ausencia.
+   * **Pausar** y **Reanudar** dejan de tomar gente nueva sin cerrar la fila; **Cerrar** la cierra y
+     libera a todos.
+6. **Mirar las métricas** en el panel: atendidos hoy, tiempo de llegada a llamado y ausentes.
+
+### Como cliente
+
+1. **Escanear el QR** de la fila, o abrir la URL de la cola de demo que muestra el resumen del despliegue.
+2. Completar el nombre, el email y, si la fila lo pide, cuántas personas son, y presionar **Tomar mi
+   lugar en la fila**.
+3. La página del ticket muestra la posición, la gente adelante y la espera estimada, y se actualiza
+   sola. Llegan mails al anotarse, al acercarse el turno y cuando le toca.
+4. **Salir de la fila** libera el lugar y hace avanzar a todos los que están detrás.
+
+---
+
+## 8. Mails
 
 **El Learner Lab niega SES**: `ses:SendEmail`, `ses:CreateEmailIdentity` y `ses:VerifyEmailIdentity`
 tienen un deny explícito. Por eso los mails salen por el **SMTP de Gmail** (`smtp.gmail.com:465`,
@@ -331,7 +421,7 @@ lo que la consigna permite. El código de SES sigue disponible para una cuenta d
 
 ---
 
-## 8. Correcciones del TP2
+## 9. Correcciones del TP2
 
 | Corrección | Cómo quedó |
 |---|---|
@@ -343,7 +433,7 @@ lo que la consigna permite. El código de SES sigue disponible para una cuenta d
 
 ---
 
-## 9. Seguridad: hallazgos de tfsec
+## 10. Seguridad: hallazgos de tfsec
 
 El repositorio de la entrega corre [tfsec](https://github.com/aquasecurity/tfsec) en cada pull
 request. Lo que marca sobre esta configuración, y qué se decidió con cada cosa:
@@ -361,7 +451,7 @@ request. Lo que marca sobre esta configuración, y qué se decidió con cada cos
 
 ---
 
-## 10. Tests y verificación local
+## 11. Tests y verificación local
 
 ```bash
 cd functions && npm ci && npm test        # unitarios e integración (necesita Docker: DynamoDB Local)
@@ -381,7 +471,7 @@ suyos en `modules/*/tests`. El pipeline corre todo esto en cada push.
 
 ---
 
-## 11. Documentación adicional
+## 12. Documentación adicional
 
 | Documento | Contenido |
 |---|---|
