@@ -9,11 +9,16 @@ this is the short, unglamorous list.
 ## 1. Before you walk away from the lab
 
 > **Destroy from the pipeline, then stop the lab.** Add the `destroy` label to the pull request and
-> approve the `aws-lab` environment. The Destroy job runs `terraform destroy` and then empties and
-> deletes the three buckets, which Terraform does not own (see §3).
+> approve the `aws-lab` environment. The Destroy job runs `terraform destroy`, then empties and
+> deletes the three buckets, which Terraform does not own (see §3), and last the state bucket, once
+> the state is empty.
 
 Then check the job's log: it should end with `Destroy complete!` and one `Vaciando y borrando:` line
-per bucket. A failed destroy is not a destroy.
+per bucket, four in all. A failed destroy is not a destroy.
+
+**Deleted Cognito pools linger in Tag Editor.** After a clean destroy, the tags API still lists one
+user pool per past deployment. They are gone: `aws cognito-idp list-user-pools` returns nothing, and
+`describe-user-pool` answers `ResourceNotFoundException`. Not a leftover, and nothing to delete.
 
 Idle, the deployment costs close to nothing — there is no server, no NAT and no database instance —
 but the S3 objects, the DynamoDB tables and the CloudWatch logs stay until destroyed.

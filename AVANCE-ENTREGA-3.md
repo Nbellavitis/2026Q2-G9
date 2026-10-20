@@ -969,3 +969,27 @@ Verificado localmente: `fmt`, `validate` de la raíz y de los módulos, los 16 t
 hallazgos nuevos. Se comprobó que los tests detectan lo que dicen: rompiendo el sufijo `.fifo` falla
 el de la cola, y pasando al bucket de logs un valor desconocido en el plan falla el de la raíz.
 
+---
+
+## El destroy, diagnosticado
+
+Dos personas vieron cosas sin destruir después del destroy. Ciclo completo en la cuenta 142609662802,
+con un inventario por servicio antes y después: apply
+[39501238265](https://github.com/josebl123/tp-cloud/actions/runs/39501238265) (202 recursos, prueba
+de humo en verde) y destroy [39503540707](https://github.com/josebl123/tp-cloud/actions/runs/39503540707)
+(202 destruidos y los tres buckets borrados).
+
+Después del destroy no quedaba nada de Queue salvo dos cosas, ninguna una falla:
+
+| | |
+|---|---|
+| El bucket del estado, `tfstate-q-<cuenta>-<región>` | Se conservaba a propósito. Con todo destruido el estado está vacío, así que ahora **el destroy también lo borra**, como último paso y solo si `terraform state list` está vacío; si no, lo conserva y avisa. El apply siguiente lo crea de nuevo |
+| Cuatro user pools de Cognito en la API de tags (Tag Editor) | Fantasmas: uno por despliegue anterior. `list-user-pools` no devuelve ninguno y `describe-user-pool` responde `ResourceNotFoundException`. AWS los saca solo |
+
+El orden del destroy es el esperado: primero los mappings de las colas y del stream, después cada
+función y su log group. No quedó ningún log group recreado.
+
+`buckets.sh delete-state` probado contra un S3 simulado: vacía de a páginas versiones y marcas de
+borrado, borra el bucket, y una segunda corrida ve que ya no existe. shellcheck y actionlint sin
+hallazgos nuevos.
+

@@ -434,3 +434,20 @@ jobs:
         env:
           STATE_BUCKET: ${{ steps.init.outputs.state-bucket }}
         run: bash scripts/buckets.sh delete "$STATE_BUCKET"
+
+      # Con todo destruido, el estado está vacío y el bucket que lo guarda no le sirve a nadie: se
+      # borra también, así la cuenta queda sin nada de Queue. El próximo apply lo crea de nuevo. Solo
+      # si el estado de verdad no tiene recursos: si quedara alguno, se conserva para no perderle el
+      # rastro.
+      - name: Borrar el bucket del estado
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          STATE_BUCKET: ${{ steps.init.outputs.state-bucket }}
+        run: |
+          remaining=$(terraform state list | wc -l)
+          if [ "$remaining" -ne 0 ]; then
+            echo "::warning::El estado todavía tiene $remaining recursos: se conserva s3://$STATE_BUCKET"
+            terraform state list
+            exit 0
+          fi
+          bash scripts/buckets.sh delete-state "$STATE_BUCKET"

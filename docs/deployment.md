@@ -28,7 +28,7 @@ request has to come from a **branch of the same repository**: a fork does not re
 
 Nothing else is required. The Terraform state lives in a bucket the pipeline creates the first time
 it runs in an account, `tfstate-q-<account>-<region>`, versioned and private, with S3's native
-locking. It is not destroyed with the rest, so a later apply in the same account finds its state.
+locking. The destroy deletes it last, once the state is empty, and the next apply creates it again.
 
 ---
 
@@ -187,8 +187,17 @@ identities.
 The Destroy job does not build anything (a compile error must not keep the account from being
 cleaned): it writes an empty bundle per function, runs `terraform destroy -refresh=false`, and then
 `buckets.sh delete` empties every version from each recorded bucket and deletes it, the logs bucket
-last, retrying while late access logs arrive. The job's log ends with `Destroy complete!` and one
-`Vaciando y borrando:` line per bucket.
+last, retrying while late access logs arrive. Last, if `terraform state list` comes back empty, it
+empties and deletes the state bucket too, so nothing of Queue is left in the account; if any resource
+were still in the state, it keeps the bucket and warns, so that resource is not lost track of. The
+job's log ends with `Destroy complete!` and one `Vaciando y borrando:` line per bucket, the state
+bucket included.
+
+**What can still show up afterwards.** The tags API (Tag Editor and Resource Groups in the console)
+keeps listing Cognito user pools for a while after they are deleted: one per deployment. They no
+longer exist (`aws cognito-idp describe-user-pool` answers `ResourceNotFoundException`) and cost
+nothing. Anything left from the TP2, or created by hand, is not Terraform's and the destroy cannot
+see it.
 
 Remove the label afterwards: the Destroy job starts when the label is *added*, so it has to come off
 before it can be added again. The next push plans from an empty state.

@@ -15,6 +15,7 @@
 #
 #   buckets.sh create <bucket-del-estado> <nombre>...   en el orden en que se van a borrar
 #   buckets.sh delete <bucket-del-estado>
+#   buckets.sh delete-state <bucket-del-estado>         al final del destroy, con el estado vacío
 
 set -euo pipefail
 
@@ -94,8 +95,27 @@ delete() {
   aws s3 rm "s3://${state_bucket}/${RECORD_KEY}" --only-show-errors
 }
 
+# Vacía y borra el bucket del estado, todas sus versiones incluidas. Solo después de un destroy
+# completo: el workflow comprueba antes que el estado no tenga recursos. El apply siguiente lo vuelve
+# a crear (.github/actions/terraform-init).
+delete_state() {
+  local state_bucket=$1 attempt
+  if ! exists "$state_bucket"; then
+    echo "Ya no existe: $state_bucket"
+    return 0
+  fi
+  echo "Vaciando y borrando: $state_bucket"
+  for attempt in 1 2 3 4 5 6; do
+    empty "$state_bucket"
+    if aws s3api delete-bucket --bucket "$state_bucket" 2>/dev/null; then return 0; fi
+    if [ "$attempt" -eq 6 ]; then echo "No se pudo borrar $state_bucket" >&2; exit 1; fi
+    sleep 10
+  done
+}
+
 case "${1:-}" in
   create) shift; create "$@" ;;
   delete) shift; delete "$@" ;;
-  *) echo "Uso: $0 create <bucket-del-estado> <nombre>... | delete <bucket-del-estado>" >&2; exit 2 ;;
+  delete-state) shift; delete_state "$@" ;;
+  *) echo "Uso: $0 create <bucket-del-estado> <nombre>... | delete <bucket-del-estado> | delete-state <bucket-del-estado>" >&2; exit 2 ;;
 esac
