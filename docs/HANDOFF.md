@@ -121,8 +121,10 @@ cd frontend && npm install && npm run typecheck && npm run lint && npm run build
 **Terraform locally**, for `fmt` and `validate` only (deploying is the pipeline's job):
 
 ```bash
-cd infra/terraform && terraform fmt -check -recursive && terraform init -backend=false && terraform validate
+cd infra/terraform && terraform fmt -check -recursive && terraform init -backend=false && terraform validate && terraform test
 ```
+
+Each module has its own tests too: `terraform init -backend=false && terraform test` in `infra/terraform/modules/<module>/`. All of them run in plan mode with mocked providers, so they need no AWS credentials.
 
 ---
 

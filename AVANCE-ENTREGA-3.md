@@ -949,3 +949,23 @@ reemplazó el mapping, la contraseña quedó cargada, la prueba de humo esperó 
 el push del WebSocket. **El mail real llegó**: un ingreso a la cola de demo desde el sitio desplegado
 mandó "Ya tenés tu lugar en Mesas" desde `queue.cloud.itba@gmail.com` por el SMTP de Gmail.
 
+---
+
+## Revisión externa de Terraform
+
+Otra revisión señaló siete puntos; todos eran ciertos y se arreglaron:
+
+| Observación | Arreglo |
+|---|---|
+| Ninguna validación exigía enteros (`consumer_max_concurrency = 2.5` pasaba), y algunas variables no tenían ninguna | Enteros y rangos en la raíz y en los módulos; validación para la retención de logs, la expiración de registros de acceso y los seis límites de throttling |
+| Relaciones entre parámetros sin comprobar | La DLQ guarda más que su cola; el techo del sitio no es menor que el de la API, y el de las rutas anónimas no es mayor; el umbral de atraso es positivo o null |
+| El seed no se re-ejecuta si solo cambia su código | `triggers` con el hash del bundle (output nuevo `source_code_hash` del módulo de funciones). Como el bundle trae el dominio, corre en casi cada despliegue: inofensivo, es idempotente |
+| `depends_on = [module.logs_bucket]` esperaba al módulo entero | Se pasa `module.logs_bucket.name`, que ya espera a la política. Se sigue conociendo en el plan: el test de la raíz lo comprueba, y falla con "Invalid count" si se le pasa un valor que no se conoce |
+| El stage estaba en el workflow y en Terraform | `API_STAGE` del workflow llega a Terraform como `TF_VAR_api_stage_name` en el plan y el destroy |
+| Sin tests de los módulos | `terraform test` en modo plan con providers simulados: la configuración entera y cada módulo, 16 corridas. Cada módulo trae su lock file con las versiones de la raíz. El job Validar los corre |
+| Contratos de `private-bucket` implícitos | El README de cada módulo dice qué garantiza cada salida (`name` espera al bucket listo; `arn` se conoce en el plan y no espera) y los rangos de cada entrada |
+
+Verificado localmente: `fmt`, `validate` de la raíz y de los módulos, los 16 tests, y actionlint sin
+hallazgos nuevos. Se comprobó que los tests detectan lo que dicen: rompiendo el sufijo `.fifo` falla
+el de la cola, y pasando al bucket de logs un valor desconocido en el plan falla el de la raíz.
+

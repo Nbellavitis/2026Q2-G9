@@ -143,6 +143,15 @@ the races against a real DynamoDB Local through Testcontainers, so **Docker must
 only the first group. The pipeline runs all of them on every push, and after every apply a smoke test
 joins the demo queue and checks that the WebSocket push arrives.
 
+```bash
+cd infra/terraform && terraform init -backend=false && terraform test
+```
+
+The Terraform tests run in plan mode with mocked providers, so they need no AWS: the root one checks
+that the whole configuration plans (every `count` and `for_each` is known before the apply) and some
+of its decisions, and each module under `infra/terraform/modules/*/tests` checks what that module
+promises, its validations included. 16 runs in all; the pipeline runs them in Validar.
+
 ## Design notes worth knowing
 
 * **Positions are derived, never stored.** The waiting list sorted by its fractional string order key

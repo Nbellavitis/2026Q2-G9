@@ -66,7 +66,7 @@ Push to the pull request's branch. Each push runs:
 
 | Job | What it does | Needs credentials |
 |---|---|---|
-| **Validar** | `terraform fmt -check`, `terraform validate`, tflint | No |
+| **Validar** | `terraform fmt -check`, `terraform validate`, `terraform test` (the whole configuration and each module, in plan mode with mocked providers), tflint | No |
 | **Compilar** | Typecheck and bundle the functions, run their 132 tests (Docker on the runner provides DynamoDB Local), build the site with the `/prod` base path | No |
 | **Plan** | Create the state bucket if missing, `terraform init`, `terraform plan`, comment the plan on the pull request, keep the saved plan for the apply | Yes |
 | **Apply** | Waits for the `aws-lab` approval. Creates the three S3 buckets (see below), applies **the saved plan** — exactly what was commented, nothing re-planned — and runs the smoke test | Yes |
