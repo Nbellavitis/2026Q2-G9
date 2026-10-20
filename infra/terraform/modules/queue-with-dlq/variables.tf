@@ -19,8 +19,8 @@ variable "visibility_timeout_seconds" {
   type        = number
 
   validation {
-    condition     = var.visibility_timeout_seconds >= 0 && var.visibility_timeout_seconds <= 43200
-    error_message = "SQS acepta de 0 a 43200 segundos."
+    condition     = floor(var.visibility_timeout_seconds) == var.visibility_timeout_seconds && var.visibility_timeout_seconds >= 0 && var.visibility_timeout_seconds <= 43200
+    error_message = "SQS acepta de 0 a 43200 segundos, enteros."
   }
 }
 
@@ -30,8 +30,8 @@ variable "max_receive_count" {
   default     = 5
 
   validation {
-    condition     = var.max_receive_count >= 1 && var.max_receive_count <= 1000
-    error_message = "maxReceiveCount va de 1 a 1000."
+    condition     = floor(var.max_receive_count) == var.max_receive_count && var.max_receive_count >= 1 && var.max_receive_count <= 1000
+    error_message = "SQS acepta de 1 a 1000 intentos, enteros."
   }
 }
 
@@ -39,12 +39,27 @@ variable "message_retention_seconds" {
   description = "Cuánto se guarda un mensaje sin consumir."
   type        = number
   default     = 345600
+
+  validation {
+    condition     = floor(var.message_retention_seconds) == var.message_retention_seconds && var.message_retention_seconds >= 60 && var.message_retention_seconds <= 1209600
+    error_message = "SQS acepta de 60 segundos a 14 días (1209600), enteros."
+  }
 }
 
 variable "dlq_retention_seconds" {
   description = "Cuánto se guarda un mensaje en la DLQ: el máximo, para tener tiempo de investigarlo."
   type        = number
   default     = 1209600
+
+  validation {
+    condition     = floor(var.dlq_retention_seconds) == var.dlq_retention_seconds && var.dlq_retention_seconds >= 60 && var.dlq_retention_seconds <= 1209600
+    error_message = "SQS acepta de 60 segundos a 14 días (1209600), enteros."
+  }
+
+  validation {
+    condition     = var.dlq_retention_seconds > var.message_retention_seconds
+    error_message = "La DLQ tiene que guardar más tiempo que su cola: en una cola estándar, un mensaje conserva su antigüedad al pasar a la DLQ, y con una retención igual o menor vencería apenas llega."
+  }
 }
 
 variable "publisher_topic_arns" {
@@ -62,6 +77,11 @@ variable "max_message_age_seconds" {
   description = "Si se indica, alarma cuando el mensaje más viejo de la cola espera más que esto: el consumidor se atrasó."
   type        = number
   default     = null
+
+  validation {
+    condition     = var.max_message_age_seconds == null || (floor(coalesce(var.max_message_age_seconds, 0)) == var.max_message_age_seconds && coalesce(var.max_message_age_seconds, 0) >= 1)
+    error_message = "El umbral es una cantidad entera de segundos, al menos 1, o null para no crear la alarma."
+  }
 }
 
 variable "tags" {

@@ -53,36 +53,71 @@ variable "log_retention_days" {
   description = "Días que CloudWatch guarda los logs de las funciones."
   type        = number
   default     = 14
+
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365], var.log_retention_days)
+    error_message = "CloudWatch acepta 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180 o 365 días."
+  }
 }
 
 variable "access_logs_expiration_days" {
   description = "Días que se guardan los registros de acceso de los buckets."
   type        = number
   default     = 30
+
+  validation {
+    condition     = floor(var.access_logs_expiration_days) == var.access_logs_expiration_days && var.access_logs_expiration_days >= 1
+    error_message = "Tiene que ser una cantidad entera de días, al menos 1."
+  }
 }
 
 variable "site_throttle_rate_limit" {
   description = "Pedidos por segundo sostenidos a los archivos del sitio estático. No invocan Lambdas: puede ser alto, y tiene que serlo para que una sala entera escaneando el mismo QR cargue la página."
   type        = number
   default     = 500
+
+  validation {
+    condition     = var.site_throttle_rate_limit > 0
+    error_message = "Tiene que ser positivo."
+  }
+
+  validation {
+    condition     = var.site_throttle_rate_limit >= var.api_throttle_rate_limit
+    error_message = "El sitio no invoca Lambdas: su techo no puede ser más bajo que el de la API, o una sala escaneando el QR carga la página rota."
+  }
 }
 
 variable "site_throttle_burst_limit" {
   description = "Ráfaga máxima de pedidos al sitio estático."
   type        = number
   default     = 1000
+
+  validation {
+    condition     = floor(var.site_throttle_burst_limit) == var.site_throttle_burst_limit && var.site_throttle_burst_limit >= 1
+    error_message = "La ráfaga es una cantidad entera de pedidos, al menos 1."
+  }
 }
 
 variable "api_throttle_rate_limit" {
   description = "Pedidos por segundo sostenidos por ruta de la API (y en el WebSocket) antes de responder 429. A la medida de la concurrencia de Lambda del lab."
   type        = number
   default     = 25
+
+  validation {
+    condition     = var.api_throttle_rate_limit > 0
+    error_message = "Tiene que ser positivo."
+  }
 }
 
 variable "api_throttle_burst_limit" {
   description = "Ráfaga máxima por ruta de la API (y en el WebSocket)."
   type        = number
   default     = 50
+
+  validation {
+    condition     = floor(var.api_throttle_burst_limit) == var.api_throttle_burst_limit && var.api_throttle_burst_limit >= 1
+    error_message = "La ráfaga es una cantidad entera de pedidos, al menos 1."
+  }
 }
 
 variable "joins_per_minute" {
@@ -91,8 +126,8 @@ variable "joins_per_minute" {
   default     = 60
 
   validation {
-    condition     = var.joins_per_minute >= 1
-    error_message = "Tiene que permitir al menos una unión por minuto."
+    condition     = floor(var.joins_per_minute) == var.joins_per_minute && var.joins_per_minute >= 1
+    error_message = "Tiene que ser un entero y permitir al menos una unión por minuto."
   }
 }
 
@@ -100,12 +135,32 @@ variable "public_write_rate_limit" {
   description = "Pedidos por segundo sostenidos en las rutas que escribe un cliente anónimo (unirse, salir)."
   type        = number
   default     = 10
+
+  validation {
+    condition     = var.public_write_rate_limit > 0
+    error_message = "Tiene que ser positivo."
+  }
+
+  validation {
+    condition     = var.public_write_rate_limit <= var.api_throttle_rate_limit
+    error_message = "Las rutas que escribe cualquiera tienen un techo más bajo que el resto de la API: si fuera más alto, no protegería nada."
+  }
 }
 
 variable "public_write_burst_limit" {
   description = "Ráfaga máxima en las rutas que escribe un cliente anónimo."
   type        = number
   default     = 20
+
+  validation {
+    condition     = floor(var.public_write_burst_limit) == var.public_write_burst_limit && var.public_write_burst_limit >= 1
+    error_message = "La ráfaga es una cantidad entera de pedidos, al menos 1."
+  }
+
+  validation {
+    condition     = var.public_write_burst_limit <= var.api_throttle_burst_limit
+    error_message = "La ráfaga de las rutas anónimas no puede superar la del resto de la API."
+  }
 }
 
 variable "session_hours" {
@@ -114,8 +169,8 @@ variable "session_hours" {
   default     = 12
 
   validation {
-    condition     = var.session_hours >= 1 && var.session_hours <= 24
-    error_message = "Cognito acepta tokens de 1 a 24 horas."
+    condition     = floor(var.session_hours) == var.session_hours && var.session_hours >= 1 && var.session_hours <= 24
+    error_message = "Cognito acepta tokens de 1 a 24 horas enteras."
   }
 }
 
@@ -153,8 +208,8 @@ variable "consumer_max_concurrency" {
   default     = 2
 
   validation {
-    condition     = var.consumer_max_concurrency >= 2 && var.consumer_max_concurrency <= 1000
-    error_message = "AWS admite de 2 a 1000."
+    condition     = floor(var.consumer_max_concurrency) == var.consumer_max_concurrency && var.consumer_max_concurrency >= 2 && var.consumer_max_concurrency <= 1000
+    error_message = "AWS admite un entero de 2 a 1000."
   }
 }
 

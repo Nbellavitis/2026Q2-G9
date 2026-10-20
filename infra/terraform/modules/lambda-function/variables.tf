@@ -53,8 +53,8 @@ variable "memory_size" {
   default     = 256
 
   validation {
-    condition     = var.memory_size >= 128 && var.memory_size <= 10240
-    error_message = "La memoria de una Lambda va de 128 a 10240 MB."
+    condition     = floor(var.memory_size) == var.memory_size && var.memory_size >= 128 && var.memory_size <= 10240
+    error_message = "Lambda acepta de 128 a 10240 MB, enteros."
   }
 }
 
@@ -64,8 +64,8 @@ variable "timeout" {
   default     = 10
 
   validation {
-    condition     = var.timeout >= 1 && var.timeout <= 900
-    error_message = "El timeout de una Lambda va de 1 a 900 segundos."
+    condition     = floor(var.timeout) == var.timeout && var.timeout >= 1 && var.timeout <= 900
+    error_message = "Lambda acepta de 1 a 900 segundos, enteros."
   }
 }
 

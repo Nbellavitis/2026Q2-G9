@@ -21,8 +21,8 @@ variable "expiration_days" {
   default     = null
 
   validation {
-    condition     = var.expiration_days == null ? true : var.expiration_days >= 1
-    error_message = "expiration_days tiene que ser al menos 1, o null para no expirar."
+    condition     = var.expiration_days == null || (floor(coalesce(var.expiration_days, 0)) == var.expiration_days && coalesce(var.expiration_days, 0) >= 1)
+    error_message = "Una cantidad entera de días, al menos 1, o null para no expirar."
   }
 }
 
