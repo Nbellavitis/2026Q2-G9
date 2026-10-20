@@ -33,6 +33,14 @@ resource "aws_lambda_invocation" "seed" {
   count = var.cargar_demo ? 1 : 0
 
   function_name = module.workers["seed"].name
+
+  # Se vuelve a invocar cuando cambian los datos (el input) o el código del seed. Su bundle trae el
+  # dominio, así que cambia con casi cualquier cambio de las funciones: es inofensivo, porque el seed
+  # es idempotente y solo crea lo que falta.
+  triggers = {
+    codigo = module.workers["seed"].source_code_hash
+  }
+
   input = jsonencode(merge(local.demo, {
     owner = {
       sub         = aws_cognito_user.demo[0].sub
