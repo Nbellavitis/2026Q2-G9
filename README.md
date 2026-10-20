@@ -11,8 +11,9 @@ of the "Queue" proposal.
 and the REST API share one API Gateway; the functions are TypeScript Lambdas over DynamoDB, with
 Cognito for staff accounts, SNS/SQS for everything asynchronous, and a WebSocket API for live
 updates. The previous delivery (Spring Boot on EC2 behind a load balancer, with RDS) is kept in
-[`tp2/`](tp2/) and in git history. [`ROADMAP.md`](ROADMAP.md) has the plan and the corrections from
-the TP2; [`AVANCE-ENTREGA-3.md`](AVANCE-ENTREGA-3.md) has where each phase stands.
+[`tp2/`](tp2/) and in git history. For the Tercera Entrega, read the [Terraform guide](infra/terraform/README.md)
+and the [deployment procedure](docs/deployment.md). [`ROADMAP.md`](ROADMAP.md) tracks delivery work;
+[`AVANCE-ENTREGA-3.md`](AVANCE-ENTREGA-3.md) is a chronological log whose older entries describe earlier states.
 
 ## MVP coverage
 
@@ -81,11 +82,13 @@ served from S3 through API Gateway with no rewrite rules. Deployed, every path s
 Everything is deployed by [the pipeline](.github/workflows/terraform.yml) on the pull request, into
 an AWS Academy Learner Lab account. In short: load the lab's credentials into the repository secrets,
 push, approve the `aws-lab` environment, read the URL in the run summary. Destroy by adding the
-`destroy` label. The full procedure is in [docs/deployment.md](docs/deployment.md).
+`destroy` label. The full procedure, expected results and acceptance checklist are in [docs/deployment.md](docs/deployment.md).
+The [Terraform guide](infra/terraform/README.md) maps the assignment requirements to the code,
+explains modules, functions and meta-arguments, and records the TP2 corrections.
 
 ### Notification emails
 
-**The Learner Lab denies SES.** Neither the role the pipeline uses nor `LabRole`, the functions'
+**SES was denied in the lab account used for this delivery.** Neither the role the pipeline uses nor `LabRole`, the functions'
 role, may verify an address or send (an explicit deny on `ses:SendEmail`, `ses:CreateEmailIdentity`
 and `ses:VerifyEmailIdentity`), so SES cannot deliver anything from the lab.
 
@@ -110,7 +113,8 @@ sees it over TLS.
 
 Limits: Gmail caps how many emails a personal account sends per day, and bounces land in the
 group's inbox. The smoke test joins the demo queue with the sender's own
-address, so every deployment sends one real email to that inbox.
+address, so a deployment can exercise a real send to that inbox. The smoke test does not check mailbox delivery;
+verify receipt manually when evaluating SMTP.
 
 ## Running the frontend locally
 
@@ -118,23 +122,29 @@ There is no local API: `npm run dev` runs the site against the one deployed in t
 proxy in `next.config.ts` (the deployed API serves the site from its own origin, so it has no CORS).
 
 ```bash
-cd frontend && npm install && cp .env.example .env.local
+cd frontend
+npm ci
+cp .env.example .env.local
 ```
 
 Set `DEV_API_URL` in `.env.local` to the deployed site's URL - "Sitio" in the summary of the last
-apply run, or `terraform output -raw site_url` - and start it:
+apply run, or inspect the outputs using the [deployment guide](docs/deployment.md#outputs-and-demo-credentials) - and start it from the same `frontend` directory:
 
 ```bash
-cd frontend && npm run dev
+npm run dev
 ```
 
-The demo data includes a staff user, `demo@queue.example`. Its password is random and changes with
-every deployment: `terraform output -raw demo_staff_password`, or register a new account.
+The demo data includes a staff user, `demo@queue.example`. Its password is random and persists
+while `random_password.demo` remains unchanged; recreating that resource generates a new one.
+Use the [output inspection instructions](docs/deployment.md#outputs-and-demo-credentials) to read it,
+or register a new staff account.
 
 ## Tests
 
 ```bash
-cd functions && npm install && npm test
+cd functions
+npm ci
+npm test
 ```
 
 132 tests: unit tests for the domain rules (ordering, estimation, lanes, the selector, metrics) and
@@ -164,25 +174,28 @@ promises, its validations included. 16 runs in all; the pipeline runs them in Va
   transaction, so an event exists if and only if the change committed. A stream function publishes
   them to SNS, and pushes, notifications and timers all start from there.
 * **Notifications are decided from state, not from events**, and claimed with a conditional write
-  per `(entry, type, pass through the line)`, so a threshold alert fires once per pass however much
-  the queue moves, and duplicates or late events change nothing.
+  per `(entry, type, pass through the line)` to suppress repeat sends after a completed claim.
+  SMTP and DynamoDB are separate operations: interruption after sending and before recording `SENT`
+  can still duplicate an email. See [failure handling](docs/architecture.md#6-concurrency-and-correctness).
 * **Grace expiry is evaluated on a timer and on every read and write**, so state is never stale on
   read and a queue nobody is watching still moves. The first one to apply it wins.
-* **One secret, and only where SES is missing.** Cognito replaced the hand-rolled JWT, and
-  DynamoDB, SNS, SQS and Secrets Manager are reached with the lab's IAM role. The only secret is the
-  Gmail app password the lab's lack of SES forces, kept out of Terraform (see
-  [Notification emails](#notification-emails)).
+* **SMTP integration credentials.** Cognito replaced the hand-rolled JWT, and
+  DynamoDB, SNS, SQS and Secrets Manager are reached with the lab's IAM role. The external integration uses a
+  Gmail app password needed for that fallback, kept out of Terraform (see
+  [Notification emails](#notification-emails)). The generated demo password is a separate sensitive
+  value held in Terraform state and plan artifacts; `sensitive` only masks normal output.
 
 ## Documentation
 
 | Document | Covers |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | **Start here.** The components, request lifecycles, data model, concurrency, events, security, and the decision log |
+| [infra/terraform/README.md](infra/terraform/README.md) | **IaC delivery:** modules, variables, outputs, functions, meta-arguments and TP2 corrections |
+| [docs/architecture.md](docs/architecture.md) | **Architecture.** The components, request lifecycles, data model, concurrency, events, security, and the decision log |
 | [docs/domain-model.md](docs/domain-model.md) | Entities and their DynamoDB items, the entry state machine, lanes, grace policies, estimation, notifications and metrics |
 | [docs/api-reference.md](docs/api-reference.md) | Every endpoint, error code and payload, plus the WebSocket contract |
 | [docs/deployment.md](docs/deployment.md) | The pipeline: credentials, plan, approval, apply, smoke test, destroy |
 | [docs/frontend.md](docs/frontend.md) | Frontend implementation notes and the design language |
-| [docs/HANDOFF.md](docs/HANDOFF.md) | **Session handoff.** Where everything stands, how to run it, the measurements taken, conventions, and the open items |
+| [docs/HANDOFF.md](docs/HANDOFF.md) | **Historical session handoff.** Measurements and context from Phase 6; use the Terraform and deployment guides for current instructions |
 | [docs/gotchas.md](docs/gotchas.md) | **Read before deploying or deleting anything.** Lab limits, pipeline traps, and the decisions a cleanup would break |
-| [arquitectura-serverless.md](arquitectura-serverless.md) | The serverless design this was built from (in Spanish). Where the build deviates, [ROADMAP.md](ROADMAP.md#ajustes-al-diseño) says so |
+| [arquitectura-serverless.md](arquitectura-serverless.md) | Original serverless proposal (historical, in Spanish). The implemented architecture is described in docs/architecture.md |
 | [tp2/](tp2/) | The TP2 delivery: CloudFormation template, diagram and runbook |

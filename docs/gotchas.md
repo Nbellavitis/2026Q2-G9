@@ -51,10 +51,11 @@ it before a destroy (previous point).
 no apply is queued.
 
 **Destroy runs with `-refresh=false`.** Refreshing a bucket makes the provider read its object lock
-configuration, which the lab denies (§3). Destroying without a refresh is safe here because nothing
-outside the pipeline changes these resources.
+configuration, which the lab denies (§3). Destroying without a refresh assumes nothing
+outside the pipeline changed these resources. It does not detect drift; inspect residual resources
+and failures before considering cleanup complete.
 
-**`scripts/buckets.sh` needs bash 5** (`mapfile`). The runner has it; macOS's `/bin/bash` 3.2 does
+**`scripts/buckets.sh` needs Bash with `mapfile` (Bash 4+).** The runner has it; macOS's `/bin/bash` 3.2 does
 not.
 
 **Two warnings that are not ours.** `terraform validate` prints `hash_key is deprecated`: it comes
@@ -68,10 +69,10 @@ infos in the smoke test; the pipeline does not run actionlint.
 | Limit | What it changed |
 |---|---|
 | An SCP denies `s3:GetBucketObjectLockConfiguration` | The AWS provider reads it right after creating any `aws_s3_bucket`, and fails on the denial in every version tried (v4.67, v5.100, v6.67). So the pipeline creates the buckets with the CLI before the apply (`scripts/buckets.sh`), with the names from the saved plan, and Terraform configures everything else on them. It is the only bucket read denied, out of 16 tried |
-| No IAM roles or OIDC providers can be created | Every function, API Gateway and the pipeline use `LabRole`. That is also why the credentials are session keys in secrets and not a role GitHub assumes |
+| No IAM roles or OIDC providers can be created | Functions and API Gateway integrations use `LabRole`; the pipeline uses the supplied lab session credentials. That is also why the credentials are session keys in secrets and not a role GitHub assumes |
 | CloudFront is blocked | API Gateway serves the site from the private bucket, on the same origin as the API |
-| SES is denied | Neither the lab's user role nor `LabRole` can verify an address or send (explicit deny on `ses:SendEmail`, `ses:CreateEmailIdentity`, `ses:VerifyEmailIdentity`). Customer emails go through Gmail's SMTP server instead (`SMTP_SENDER_EMAIL` and `GMAIL_APP_PASSWORD`, see [deployment.md](deployment.md)); without them, the notifier writes each email to its log. Setting `SES_SENDER_EMAIL` or `SES_VERIFIED_RECIPIENTS` makes the apply fail |
-| Lambda concurrency is limited | API Gateway throttles before Lambda does (429 instead of a 5xx), and each SQS consumer has its own ceiling (`consumer_max_concurrency`), so a burst of notifications cannot starve the API or the live push |
+| SES is denied | Neither the lab's user role nor `LabRole` can verify an address or send (explicit deny on `ses:SendEmail`, `ses:CreateEmailIdentity`, `ses:VerifyEmailIdentity`). Customer emails go through Gmail's SMTP server instead (`SMTP_SENDER_EMAIL` and `GMAIL_APP_PASSWORD`, see [deployment.md](deployment.md)); without a configured sender/password value, the notifier writes each email to its log. Setting `SES_SENDER_EMAIL` or `SES_VERIFIED_RECIPIENTS` makes the apply fail |
+| Lambda concurrency is limited | API Gateway throttles before Lambda does (429 instead of a 5xx), and each SQS consumer has its own ceiling (`consumer_max_concurrency`), which limits consumer pressure but does not reserve account concurrency for the API or live push |
 
 ---
 
@@ -79,7 +80,8 @@ infos in the smoke test; the pipeline does not run actionlint.
 
 **Tests need Docker running.** The integration tests start DynamoDB Local with Testcontainers. If
 Docker Desktop is not running they fail at setup, which looks like a code break and is not:
-`open -a Docker` and run them again.
+start Docker Desktop (or the Docker daemon for the environment), then run them again.
+`open -a Docker` is a macOS-specific command.
 
 **One test is flaky, about 1 run in 30:** "tres a la vez" in `races.test.ts`. It is not the
 optimistic lock - two writes on the same version cannot both commit. If it fails again, the reason is
@@ -131,11 +133,11 @@ Each of these is a deliberate decision that a well-meaning cleanup would break.
 | The broadcaster rereads the queue instead of applying the event | A duplicate, late or out-of-order event can cause one push too many, never a wrong screen. Events for the same queue that arrive together cost one read and one push per connection |
 | A board can arrive as `queue.changed`, with no data | A WebSocket message is limited to 128 KB. A very long queue's board does not fit, so the browser fetches it over REST |
 | Staff open the WebSocket with a ticket, not their token | A browser cannot set headers on a WebSocket, so the credential goes in the URL. The ticket is single-use and expires in a minute; the Cognito token never reaches a URL or a log |
-| The connections index is eventually consistent | The first view of every screen comes over REST, so missing the first push leaves nobody out of date |
+| The connections index is eventually consistent | REST provides the initial view, but a connection absent from the eventually consistent index can miss a later push; another push, reload or reconnection is needed to reconcile |
 | Every page is uploaded three times to the site bucket | `login/index.html`, `login/` and `login`: API Gateway's S3 integration requests the key exactly as it arrives in the URL and does not add `index.html` |
 | The 404 page is wrapped in `#[[ … ]]#` | API Gateway runs the template through Velocity, and Next's HTML has `$` and `#` in it |
 | JSON bodies are decoded from base64 | `binary_media_types` is `*/*` so fonts and images arrive intact, and that makes API Gateway hand every body over in base64 |
-| Terraform creates the SMTP secret but never its value | A value set through Terraform would be in plain text in the saved plan — a workflow artifact anyone can download on a public repository — and in the state. The Apply job writes it with the CLI instead |
+| Terraform creates the SMTP secret but never its value | A value set through Terraform would be included in the saved plan artifact and in state; `sensitive` alone would not remove it. Access depends on repository/artifact permissions. The Apply job writes it with the CLI instead |
 | The SMTP secret has `recovery_window_in_days = 0` | With the default 30 days, a destroyed secret keeps its name reserved and the next apply fails creating it. The cátedra destroys and applies again |
 | The notifier simulates when the SMTP secret is empty, but fails on a wrong password | The secret is empty between the apply and the step that fills it, and the smoke test may send in between. A wrong password is a misconfiguration: failing makes the notification retry and end in the DLQ, with its alarm |
 | The functions are two `for_each` maps, not one | The REST API depends on the functions it serves, and some workers need the API's URL. In one map, everything would depend on everything |

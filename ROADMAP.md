@@ -5,6 +5,10 @@ desplegado a mano) y terminando en la arquitectura de
 [arquitectura-serverless.md](arquitectura-serverless.md), desplegada con Terraform desde un pipeline
 de GitHub Actions.
 
+**Lectura vigente:** [README Terraform](infra/terraform/README.md), [guía de despliegue](docs/deployment.md)
+y [arquitectura implementada](docs/architecture.md). Las fases anteriores conservan el plan original;
+la lista de entrega y la matriz de requisitos de abajo describen el estado revisado el 2026-10-20.
+
 ---
 
 ## Cómo se evalúa
@@ -55,13 +59,14 @@ fijos de nuestra cuenta, pasos manuales fuera del README y cualquier recurso que
 | Decisión | Elegido | Consecuencia |
 |---|---|---|
 | Autenticación del staff | **Cognito** | La API REST valida el token con un authorizer de Cognito, sin ejecutar ninguna Lambda. Desaparecen el login propio, BCrypt, la Lambda authorizer y el secreto del JWT |
-| Canales de aviso | **Solo SES** | Sin Web Push: sin service worker ni claves VAPID. En el sandbox de SES los emails llegan solo a direcciones verificadas, alcanza con las del grupo |
+| Canales de aviso | **Gmail SMTP en el lab; SES opcional donde esté permitido** | Sin Web Push ni SMS. El app password vive en Secrets Manager; sin configuración se simula el email |
 | Origen del PR | **Una rama en el repositorio de la cátedra** | Ahí se cargan los secrets, y el workflow del PR los recibe. Desde un fork no los recibiría |
 | Punto de control | **No hay** | Se va con serverless hasta el final. El riesgo se maneja con el orden de las fases y la lista de recortes |
 | Lenguaje de las funciones | **TypeScript sobre Node 22**, todo en `functions/` | Arranques en frío de ~200 ms sin SnapStart, un solo lenguaje para las Lambdas y el frontend, y bundles de pocos KB con esbuild. El dominio se porta desde Java en lugar de extraerse a un módulo Maven; `backend/` queda solo como referencia hasta la Fase 6 |
 
-Con Cognito y SES **no queda ningún secreto que guardar**: DynamoDB, SES, SNS y SQS se autentican con
-IAM. Secrets Manager sale del diseño.
+Cognito elimina el secreto JWT propio. Los servicios AWS se autentican con IAM; Gmail SMTP agrega
+un app password guardado en GitHub Secrets y Secrets Manager. La contraseña del usuario de demo
+también es sensible y queda en el estado de Terraform.
 
 ---
 
@@ -72,18 +77,18 @@ IAM. Secrets Manager sale del diseño.
 | # | Ajuste | Motivo |
 |---|---|---|
 | 1 | Despliegue con **Terraform y GitHub Actions**, no con SAM ni desde la máquina local | Lo exige la consigna |
-| 2 | **Ningún secreto en texto plano**, y en la práctica ningún secreto: Cognito reemplaza el JWT propio y todo lo demás se autentica con IAM | Corrección del TP2: "falta encriptar", por las contraseñas de `app.env` subidas en texto plano |
+| 2 | **Secreto SMTP fuera del repositorio, plan y estado:** Cognito reemplaza el JWT propio; Gmail usa Secrets Manager. El password de demo sí queda en estado | Corrección del TP2: "falta encriptar", por las contraseñas de `app.env` subidas en texto plano |
 | 3 | **Tres buckets privados:** `spa`, `artefactos` (zips de las Lambdas) y `logs` (access logs de los otros dos) | Corrección del TP2: "separaría el bucket privado en 3" |
 | 4 | **Justificar en el README por qué no hay VPC** | El corrector elogió la parte de red; su ausencia tiene que leerse como una decisión |
 | 5 | **Las métricas históricas quedan fuera de esta entrega** (Firehose, el data lake, Glue y Athena). Se mencionan en el README como trabajo futuro. Tampoco X-Ray, que no se vio en clase | Recorta alcance. Las métricas del día ya salen de los ítems `F#` |
 | 6 | CloudFront figura como **bloqueado por el lab**, no como decisión del equipo | Es lo que pasó en el TP2, y es mejor argumento |
-| 7 | Un recurso de API Gateway **por página** del sitio, más `binaryMediaTypes` | Con `trailingSlash: true`, `/login/` es `login/index.html`, y la integración con S3 no agrega `index.html` sola. Sin `binaryMediaTypes`, las fuentes y las imágenes llegan rotas |
+| 7 | **Raíz y proxy de API Gateway**, objetos HTML con claves alternativas y `binaryMediaTypes` | Con `trailingSlash: true`, `/login/` es `login/index.html`, y la integración con S3 no agrega `index.html` sola. Sin `binaryMediaTypes`, las fuentes y las imágenes llegan rotas |
 | 8 | **Cognito en lugar de la autenticación propia**, y **sin Web Push** | [Decisiones tomadas](#decisiones-tomadas) |
 | 9 | **Funciones en TypeScript, sin SnapStart ni alias.** Donde el documento dice "Java + SnapStart" o módulos Maven (`q-domain`, `q-dynamo`, `q-fn-*`), vale `functions/src/domain`, `functions/src/persistence` y un handler por función en `functions/src/handlers` | [Decisiones tomadas](#decisiones-tomadas) |
 | 10 | **`λ lifecycle` libera en lotes de 24, no de 30.** Cada entrada liberada escribe cuatro ítems (borrar el SK viejo, escribir el nuevo, actualizar su referencia y su evento), y 24 × 4 + la cola = 97 entra en una transacción; 30 no entraba | Medido en la Fase 2 |
 | 11 | **Sin `activeCount` en `META`.** Cada mutación ya lee todas las entradas activas de la cola, así que la capacidad se cuenta sobre lo leído, bajo la misma versión. Un contador más sería un dato duplicado que puede desincronizarse | Fase 2 |
 | 12 | **Volver a la fila a alguien que había terminado es un ingreso nuevo.** Pasa por los controles de `join` y en su orden: su carril si todavía acepta su tamaño (si no, el que lo acepte hoy), el tope de ese carril y el de la cola | Su carril se pudo apagar o retirar mientras estaba afuera: la regla de los carriles solo cuenta a los activos. Revisión de las fases 1 a 5 |
-| 13 | **Los buckets los crea el pipeline; Terraform los configura.** `scripts/buckets.sh` los crea antes del apply con los nombres del plan y los borra después del destroy; el módulo `private-bucket` administra todo lo demás | El SCP del Learner Lab niega `s3:GetBucketObjectLockConfiguration`, que el provider lee después de crear cualquier `aws_s3_bucket`, en todas sus versiones. Primera corrida en el lab |
+| 13 | **Los buckets los crea el pipeline; Terraform los configura.** `scripts/buckets.sh` los crea antes del apply con los nombres del plan y los borra después del destroy; el módulo `private-bucket` administra todo lo demás | El SCP del Learner Lab niega `s3:GetBucketObjectLockConfiguration`, que el provider lee después de crear cualquier `aws_s3_bucket`, en las versiones probadas. Primera corrida en el lab |
 | 14 | **Los avisos salen por el SMTP de Gmail, no por SES.** El notifier manda desde la cuenta del grupo con una contraseña de aplicación, que vive cifrada en Secrets Manager: Terraform crea el secreto vacío y el pipeline le escribe el valor con la CLI. Sin la cuenta configurada, los avisos se simulan | El Learner Lab niega SES a todos los roles (deny explícito sobre `ses:SendEmail`, `ses:CreateEmailIdentity` y `ses:VerifyEmailIdentity` en `LabRole`). Vuelve a haber un secreto, el único, y se trata como pidió la corrección del TP2: cifrado, y fuera del repositorio, del plan y del estado |
 
 ---
@@ -101,7 +106,7 @@ Cada uno con la estructura de la clase 10: `main.tf`, `variables.tf`, `outputs.t
 | Módulo | Qué encapsula | Se usa para |
 |---|---|---|
 | `private-bucket` | Bucket con bloqueo de acceso público, versionado, política que exige TLS, logs de acceso y expiración opcional | `spa`, `artefactos`, `logs` |
-| `lambda-function` | Función Node con `LabRole`, log group con retención, zip versionado en el bucket de artefactos y variables de entorno | Las 7 funciones |
+| `lambda-function` | Función Node con `LabRole`, log group con retención, zip versionado en el bucket de artefactos y variables de entorno | Las 9 funciones |
 | `queue-with-dlq` | Cola SQS (standard o FIFO) con su DLQ, la política de redrive y la alarma de profundidad > 0 | `q-push`, `q-notifications`, `q-lifecycle` |
 
 `queue-with-dlq` es el que mejor muestra DRY: sin él, cada cola son cuatro recursos repetidos tres
@@ -344,42 +349,37 @@ AWS.**
 
 ## Fase 7 · Entrega
 
-- [ ] **README de `infra/terraform/`**, pensado para alguien que no nos conoce:
-  - **evolución desde el TP2:** qué cambió de la arquitectura y por qué, como pedía la segunda
-    entrega;
-  - qué hace cada módulo, sus entradas y salidas, y por qué es propio o externo;
-  - cada función, cada meta-argumento, cada local y cada datasource, con el archivo y la línea, y
-    el motivo de usarlo ahí;
-  - el pipeline: qué corre en cada evento, cómo aprobar el `apply` y cómo destruir;
-  - guía paso a paso para la cátedra: requisitos, cómo cargar las credenciales del lab en los
-    secrets, cómo correr el pipeline, qué outputs mirar, cómo probar la app y cómo destruir;
-  - por qué no hay VPC;
-  - trabajo futuro: métricas históricas con Firehose, S3, Glue y Athena;
-  - cómo se aplicó cada corrección del TP2, en particular dónde quedó cada valor que estaba en
-    `app.env` y por qué ya no hay secretos.
-- [ ] Un `README.md` por módulo.
-- [ ] Diagrama actualizado, generado o revisado contra el código de Terraform.
-- [ ] **Ensayo de la cátedra:** alguien del grupo que no haya tocado el Terraform sigue solo el
-      README, en su propia cuenta del lab: `apply`, usar la app, `destroy`, y otro `apply`. Cada
-      paso donde tenga que preguntar es un arreglo del README.
-- [ ] PR desde una rama del repositorio de la cátedra, con el pipeline en verde y el hash del commit
-      en el campus.
+- [x] [README de Terraform](infra/terraform/README.md): módulos, variables, outputs, funciones,
+      meta-argumentos, locals, datasources, límites del estado y correcciones del TP2.
+- [x] README por módulo propio con entradas, salidas y ejemplos referidos al código vigente.
+- [x] [Guía de despliegue](docs/deployment.md): configuración inicial, eventos/jobs, artefactos,
+      resultados esperados, recuperación, comprobaciones manuales y destroy.
+- [x] [Diagrama Mermaid versionado](docs/architecture.md#2-system-overview) de la arquitectura
+      implementada. Las exportaciones locales PNG/SVG no se consideran parte de la entrega hasta
+      que se incorporen al repositorio.
+- [ ] **Ensayo independiente de la cátedra:** otra persona, en su propia cuenta, sigue sólo la guía:
+      `apply → uso → destroy → apply`. Registrar cuenta/región, revisión, runs y resultados sin secretos.
+- [ ] Confirmar PR en el repositorio exigido y pipeline completo en verde para la revisión final.
+- [ ] Incluir el hash del commit final en campus. Documentar no equivale a realizar la entrega.
+- [ ] Verificar rotación de credenciales antiguas y limpieza de recursos TP2 fuera de Terraform.
 
 ---
 
 ## Requisitos de Terraform y dónde se cumplen
 
-| Requisito | Uso previsto |
+| Requisito | Uso implementado |
 |---|---|
-| Módulos propios | `private-bucket` ×3, `lambda-function` ×7, `queue-with-dlq` ×3 |
-| Módulo externo | `terraform-aws-modules/dynamodb-table/aws` ×2, con la versión fijada |
-| `for_each` | buckets, Lambdas, colas, páginas del sitio, archivos del sitio, ítems de demo |
-| `count` | suscripción por email a `q-alerts`, solo si se pasa `var.email_alertas`. Los datos de demo no: usan `for_each` sobre un mapa que queda vacío si `var.cargar_demo` es `false`, porque un recurso no puede tener `count` y `for_each` a la vez |
-| `depends_on` | `aws_api_gateway_deployment` sobre los métodos y las integraciones: el deployment toma una foto de la API y Terraform no ve que la necesita completa |
-| `lifecycle` | `create_before_destroy` en el deployment de API Gateway, para que el stage nunca quede apuntando a nada; `replace_triggered_by` para redesplegar cuando cambia la configuración de la API |
-| Funciones | `jsonencode()` (políticas, JSON Schemas, filtros de SNS, `config.json`) · `jsondecode()` + `file()` (datos de demo) · `fileset()` + `lookup()` + `filemd5()` (subir el sitio con el content-type y el etag correctos) · `sha1()` (disparador del redeploy de la API) · `merge()` (tags) · `format()` (nombres) |
-| Locals | prefijo de nombres y tags comunes; el mapa de Lambdas (runtime, memoria, timeout, disparador) que recorre el `for_each`; el mapa de colas; la lista de páginas del sitio; la tabla de tipos MIME |
-| Datasources | `aws_caller_identity` y `aws_region` (nombres únicos en cualquier cuenta), `aws_iam_role` (`LabRole`), `aws_iam_policy_document` (políticas de buckets, colas y tópicos, en lugar de JSON a mano), `archive_file` (zips de las Lambdas Node) |
+| Módulos propios | `private-bucket` ×3, `lambda-function` ×9, `queue-with-dlq` ×3 |
+| Módulo externo | `terraform-aws-modules/dynamodb-table/aws` ×2, versión `5.5.2` |
+| `for_each` | Mapas de funciones, colas, suscripciones, objetos S3, permisos y rutas WebSocket |
+| `count` | Usuario/password/invocación de demo, SMTP, identidades SES y recursos opcionales de módulos |
+| `depends_on` | Log group antes de Lambda, permiso Cognito antes del usuario de demo y rutas WebSocket; el destino de logs se ordena mediante `module.logs_bucket.name` |
+| `lifecycle` | `create_before_destroy` en deployments REST y WebSocket; los hashes de `triggers` causan el redeploy, sin `replace_triggered_by` |
+| Funciones | `jsonencode`, `jsondecode`, `file`, `fileset`, `lookup`, `filemd5`, `sha1`, `merge`, `format` y otras; ejemplos y motivos en el README Terraform |
+| Locals y datasources | Nombres, tags y mapas derivados; cuenta, región, rol existente, políticas, partición y empaquetado |
+
+La [matriz detallada](infra/terraform/README.md) enlaza cada uso con su archivo real. Esta tabla
+describe implementación revisada; no certifica una ejecución actual del pipeline.
 
 ---
 
@@ -387,13 +387,13 @@ AWS.**
 
 Es el 10 % de la nota y lo primero que ve quien abre el repositorio.
 
-- [ ] `terraform fmt`, `validate` y `tflint` en el pipeline: un PR con errores no pasa.
+- [x] `terraform fmt`, `validate`, `test` (raíz y módulos con mocks) y `tflint` configurados en el pipeline: un PR con errores no pasa.
 - [ ] Cada variable con `type`, `description` y, donde aplica, un bloque `validation` (por ejemplo, la
       región o el formato de un email).
-- [ ] Cada output con `description`, y `sensitive = true` en la contraseña de demo.
-- [ ] Versiones fijadas: Terraform, el provider y el módulo externo.
+- [x] Cada output con `description`, y `sensitive = true` en la contraseña de demo (presente en estado).
+- [x] Terraform fijado en el workflow; providers restringidos y lockfile versionado; módulo externo con versión exacta.
 - [ ] Ningún ID, ARN, número de cuenta ni nombre de bucket escrito a mano.
-- [ ] Nombres de recursos en `snake_case` y nombres en AWS con un único prefijo (`local.prefix`).
+- [ ] Nombres de recursos en `snake_case` y nombres en AWS con un único prefijo (`var.project`).
 - [ ] Un archivo por área, como en la estructura de la Fase 1.
 - [ ] Las convenciones de *Terraform Best Practices*, que la consigna recomienda: `this` para el
       recurso principal de cada módulo, nombres sin repetir el tipo de recurso, `versions.tf` en cada

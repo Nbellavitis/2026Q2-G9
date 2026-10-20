@@ -3,6 +3,11 @@
 Everything a new session or a teammate needs to continue without re-deriving it. Written
 2026-10-17, on branch `entrega-3`, at the end of Phase 6 of [ROADMAP.md](../ROADMAP.md).
 
+> **Historical snapshot from 2026-10-17.** Current operator instructions are in
+> [deployment.md](deployment.md), the [Terraform README](../infra/terraform/README.md), and the
+> current delivery checklist in [ROADMAP.md](../ROADMAP.md#fase-7--entrega). Counts and deployment
+> results below describe the session at that date, not the current PR state.
+>
 > Read [gotchas.md](gotchas.md) before deploying or deleting anything on AWS. This document is the
 > map; that one is the minefield.
 
@@ -138,7 +143,8 @@ Each module has its own tests too: `terraform init -backend=false && terraform t
   that did not commit, and everything asynchronous — pushes, notifications, the grace timer, releasing
   a closed queue — is a consumer of those events.
 * **Consumers re-read state instead of trusting events.** Duplicates and reordering cost at most an
-  extra push, never a wrong screen or a second email.
+  extra evaluation. The claims reduce duplicate emails but do not make SMTP and DynamoDB atomic;
+  see the current limits in [architecture.md](architecture.md#6-concurrency-and-correctness).
 * **The lab's limits shaped the deployment.** No IAM roles (everything uses `LabRole`), no
   CloudFront (API Gateway serves the site), an SCP that keeps Terraform from creating S3 buckets
   (the pipeline creates them), and no SES (emails go through Gmail's SMTP server, the one secret).

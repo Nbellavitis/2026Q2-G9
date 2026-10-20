@@ -195,20 +195,24 @@ configured guess rather than a measurement.
 Notifications are decided by `λ notifier`, after the change has been committed: every event that can
 move someone's place reaches it through SNS and the `q-notifications` SQS queue. It does not decide
 from the event but from the current state of the queue, because one movement can make dozens of
-people cross a threshold at once. That makes order and duplicates irrelevant: two evaluations of the
-same state produce the same notifications.
+people cross a threshold at once. Two evaluations of the same state select the same notices;
+conditional claims suppress repeat sends after a completed notification.
 
-De-duplication is structural, not time-based. Each notification is claimed by writing
-`NOTIF#<type>#<cycle>` on condition that it does not exist yet, so a threshold alert fires **once per
-pass through the line**, however many times the queue moves. When a customer is sent back to
-`WAITING` after a no-show, the cycle advances and the alerts become eligible again - a second call
-really does produce a second "it's your turn".
+Each notification uses the key `NOTIF#<type>#<cycle>`. A conditional update claims a notice if it
+is new, FAILED, or PENDING with an expired 120-second lease, subject to a five-attempt budget. SENT
+notices are skipped. When a customer returns to WAITING after a no-show, its cycle advances and
+notices become eligible again. This is application-level deduplication, independent of SNS's
+five-minute window. It does not make SMTP sending and recording SENT atomic: a crash between them
+can cause a duplicate email. An active or exhausted claim is skipped without itself failing the
+SQS record. See [failure handling](architecture.md#6-concurrency-and-correctness).
 
 Notifications go by email, and only to the email: a customer who left just a phone number has no
 channel (there is no SMS). The Learner Lab denies SES, so they go through Gmail's SMTP server from
 the group's account ([`smtp.ts`](../functions/src/notifications/smtp.ts)); without that account
 configured, every email is written to the function's log instead and recorded as channel `LOG`. A
-failed send is recorded on the item and retried, up to 5 attempts; it never undoes a queue movement.
+failed send is recorded on the item and reported for retry, up to the claim budget of 5 attempts;
+it never undoes a queue movement. Simulated sends are recorded as SENT with channel LOG, which
+means the simulated path completed, not that an email was delivered.
 
 ## Metrics
 

@@ -4,9 +4,9 @@ Las decisiones que comparten todos los buckets de Queue, aplicadas sobre un buck
 
 El módulo no crea el bucket. Después de crear un `aws_s3_bucket`, el provider de AWS lee su
 configuración de object lock, y el SCP del Learner Lab niega esa lectura con un deny explícito
-(`s3:GetBucketObjectLockConfiguration`). Ninguna versión del provider lo tolera: v4.67, v5.100 y v6.67
-tratan ese `AccessDenied` como error en la partición `aws`, y la lectura es incondicional. Todas las
-demás lecturas de S3 están permitidas, así que el pipeline crea el bucket vacío
+(`s3:GetBucketObjectLockConfiguration`). Las versiones ensayadas en el lab del grupo (v4.67, v5.100 y v6.67)
+fallaron ante ese `AccessDenied`; esto no establece el comportamiento de toda versión futura ni
+de otra cuenta. Las demás lecturas probadas estaban permitidas, así que el pipeline crea el bucket vacío
 ([`scripts/buckets.sh`](../../scripts/buckets.sh)) y este módulo administra todo lo que va encima.
 
 | Siempre | Opcional |
@@ -26,6 +26,10 @@ module "logs" {
   expiration_days = 30
 }
 ```
+
+El ejemplo se evalúa desde la raíz Terraform y usa un nombre ilustrativo, que debe reemplazarse.
+Los usos vigentes están en [storage.tf](../../storage.tf); los nombres reales se derivan de la
+cuenta, región y prefijo.
 
 ## Entradas
 
@@ -55,7 +59,9 @@ module "logs" {
   el provider 6 de AWS; crearlos solo cuando se piden evita configuraciones vacías.
 - **`access_logs_bucket` recibe un nombre, no un id.** `count` tiene que poder evaluarse en el
   `plan`, y el id de un bucket que todavía no existe recién se conoce en el `apply`. Por eso quien
-  llama al módulo tiene que declarar con `depends_on` que el bucket destino se crea antes.
+  llama al módulo debe garantizar que el destino y su política estén preparados. La raíz pasa
+  `module.logs_bucket.name`, cuyo output espera al versionado y la política, sin depender de todo
+  el módulo. Otras opciones del bucket no forman parte de esa garantía.
 - **El output `name` espera al versionado y a la política** (`depends_on` en el output). Quien usa
   el nombre no ve esos recursos, y un objeto subido antes de activar el versionado quedaría sin
   `version_id`, que es lo que usa una Lambda para apuntar a su zip.
@@ -67,5 +73,6 @@ module "logs" {
 
 ## Tests
 
-`terraform test` en esta carpeta, en modo plan y con el provider simulado: no necesita AWS. Las
-versiones son las de la raíz (`.terraform.lock.hcl`). El pipeline los corre en cada push.
+`terraform test` en esta carpeta, en modo plan y con el provider simulado: no necesita AWS. El
+lockfile de esta carpeta fija sus providers; los tests corren desde el pipeline en los eventos
+que ejecutan el job de validación.

@@ -4,10 +4,10 @@ Una función Lambda en Node.js con las decisiones que comparten todas las de Que
 
 - **El paquete se guarda versionado en el bucket de artefactos.** El bundle de esbuild se zipea con
   el datasource `archive_file`, se sube a `lambdas/<nombre>.zip` y la función apunta a esa versión
-  exacta del objeto (`s3_object_version`). Cada despliegue queda registrado como una versión.
+  exacta del objeto (`s3_object_version`). Cada carga del paquete genera una versión del objeto; la Lambda usa esa versión de S3, no un alias de versión publicada de Lambda.
 - **Log group propio, con retención.** Si lo creara Lambda sola, no tendría retención y los logs se
   guardarían para siempre.
-- **Siempre `LabRole`.** El Learner Lab no permite crear roles, así que el rol se recibe como entrada
+- **Rol recibido como entrada; la raíz usa `LabRole`.** El Learner Lab no permite crear roles, así que el rol se recibe como entrada
   en lugar de crearse acá.
 - **arm64 por defecto.** El código es JavaScript puro, así que corre igual en Graviton, que cuesta
   menos por milisegundo.
@@ -15,16 +15,21 @@ Una función Lambda en Node.js con las decisiones que comparten todas las de Que
 ## Uso
 
 ```hcl
-module "health" {
+module "public_example" {
   source = "./modules/lambda-function"
 
-  name             = "q-health"
-  source_file      = "../../functions/dist/health/index.mjs"
+  name             = "q-public-example"
+  source_file      = "../../functions/dist/public/index.mjs"
   role_arn         = data.aws_iam_role.lab.arn
-  artifacts_bucket = module.artefactos.name
-  environment      = { TABLE_NAME = "q-main" }
+  artifacts_bucket = module.private_buckets["artefactos"].name
+  environment      = { TABLE_NAME = module.main_table.dynamodb_table_id }
 }
 ```
+
+El ejemplo supone ejecución desde la raíz Terraform, bundles compilados y el bucket de artefactos
+configurado con versionado. Las llamadas vigentes están en [functions.tf](../../functions.tf) y
+[auth.tf](../../auth.tf). El rol se recibe como entrada: `LabRole` es la elección de esta raíz,
+no un nombre impuesto por el módulo.
 
 ## Entradas
 
@@ -64,5 +69,6 @@ module "health" {
 
 ## Tests
 
-`terraform test` en esta carpeta, en modo plan y con el provider simulado: no necesita AWS. Las
-versiones son las de la raíz (`.terraform.lock.hcl`). El pipeline los corre en cada push.
+`terraform test` en esta carpeta, en modo plan y con el provider simulado: no necesita AWS. El
+lockfile de esta carpeta fija sus providers; los tests corren desde el pipeline en los eventos
+que ejecutan el job de validación.

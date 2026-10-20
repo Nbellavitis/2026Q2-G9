@@ -68,8 +68,8 @@ Two paths, and the line between them is the DynamoDB transaction:
   domain rules in memory, and writes everything that changed — including the events describing the
   change — in one transaction conditioned on the queue's version. The response goes back at once.
 * **Asynchronous.** Everything else starts from those event items: the live push, the emails, the
-  grace timer, and releasing a closed queue. Each consumer is retried independently and is
-  idempotent, so a failure in one never undoes or blocks the others.
+  grace timer, and releasing a closed queue. Consumers have independent queues and retries, so a
+  downstream failure does not roll back the committed change. Delivery limits are described in §6.
 
 ### Components at a glance
 
@@ -79,7 +79,7 @@ Two paths, and the line between them is the DynamoDB transaction:
 | API Gateway WebSocket | Holds the browsers' connections; Lambda only runs on connect, disconnect, and to push | Push without polling, and without a server holding sockets |
 | 9 Lambdas, TypeScript on Node 22 | The API, the consumers, the seed, the Cognito trigger | Short cold starts without SnapStart; one language with the frontend; small single-file bundles |
 | DynamoDB `q-main` | Every item but the users, in one table | Every operation is per queue; one partition per queue gives transactions over a queue's items and ordered reads by prefix |
-| DynamoDB Streams | The source of every asynchronous action | Fires only for committed writes, in order per partition |
+| DynamoDB Streams | The source of every asynchronous action | Fires for committed writes; ordering is guaranteed per item |
 | SNS FIFO + SQS | Fan-out, filtering and buffering per consumer | Each consumer gets its own queue, retries, DLQ and concurrency limit |
 | Cognito | Staff accounts | Removes the hand-rolled login, password hashing and the JWT secret; API Gateway validates tokens without running a Lambda |
 | Gmail SMTP | Notification emails | The lab denies SES to every role. Gmail's SMTP server delivers to any address, with the group's account and an app password |
@@ -89,8 +89,9 @@ Two paths, and the line between them is the DynamoDB transaction:
 
 **There is no VPC.** Nothing in the design needs one: DynamoDB, SNS, SQS, Secrets Manager and Cognito are
 reached over AWS's public endpoints with IAM, and there is no database instance or server to
-isolate. A VPC would add NAT cost and cold-start latency for no protection the IAM boundary does not
-already give.
+isolate. A VPC would require designing outbound access to these endpoints and Gmail, for example through
+service endpoints and internet egress. This delivery has no component requiring private subnets;
+a production account may still choose a VPC for network policy and egress controls.
 
 ---
 
@@ -220,27 +221,41 @@ commit — are tested against DynamoDB Local in `functions/test/integration/race
 
 Each operation's events are items in its own transaction. So an event exists if and only if the
 change it describes committed: there is no "wrote the change, crashed before publishing" and no
-"published, then the write failed". The stream delivers them to `stream-publisher` in order per
-partition; publishing to SNS deduplicates by event id, so reprocessing a stream batch publishes
-nothing twice.
+"published, then the write failed". DynamoDB Streams guarantees ordering per item, not across all
+event items of a queue. `stream-publisher` sorts each received batch by queue version and event key;
+that does not establish global order across batches or shards. SNS uses the event id for its
+five-minute deduplication window. Retries outside that window can deliver duplicates.
+
+References: [DynamoDB Streams ordering](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Streams.html)
+and [SNS FIFO deduplication](https://docs.aws.amazon.com/sns/latest/dg/fifo-message-dedup.html).
 
 ### 6.3 Consumers decide from state
 
-Neither the broadcaster nor the notifier nor lifecycle trusts the event's content: each re-reads the
-queue and acts on what is true now. A duplicate, late or out-of-order event costs at most one push too
-many, never a wrong screen; the notifier's conditional claim on `NOTIF#<type>#<cycle>` makes a second
-email impossible; and lifecycle finds nothing to expire if someone already did.
+Consumers use the event as a trigger and re-read the current queue state rather than applying
+blind deltas. This reduces the effects of duplicate or late events; it is not an end-to-end
+exactly-once guarantee. Lifecycle checks what is currently due, and the notifier claims
+`NOTIF#<type>#<cycle>` conditionally before sending. A failed claim can mean already sent, an active
+lease, or an exhausted attempt budget.
+
+SMTP delivery and marking the claim `SENT` are separate operations. If delivery succeeds and the
+function stops before persisting `SENT`, a later retry can resend after the lease expires. The
+application therefore cannot promise that a second email is impossible.
 
 ### 6.4 Failure handling
 
 | Where | On failure |
 |---|---|
-| Stream → `stream-publisher` | Reports which record failed; Lambda retries from there and bisects the batch; after 5 attempts or an hour, the batch goes to `q-stream-failures`, which has an alarm. The stream keeps only 24 hours |
-| SQS consumers | Report failed messages only (`ReportBatchItemFailures`); a message that keeps failing ends in its queue's DLQ, which has an alarm |
-| `q-push` | Also alarms if its oldest message is older than 10 seconds: a live push that late means the consumer is down |
-| Notifications | A failed send is recorded on the notification item and retried, up to 5 attempts in total |
+| Stream → `stream-publisher` | Reports the first pending stream sequence number; retries are bounded at 5 with a maximum record age of one hour. Discarded-invocation metadata goes to `q-stream-failures`, with an alarm. The source stream retains records for 24 hours |
+| SQS consumers | Return reported failures with `ReportBatchItemFailures`. Repeatedly failed messages can reach the DLQ after the redrive limit; errors caught and treated as success are acknowledged instead |
+| `q-push` | Alarms on oldest-message age above 10 seconds, evaluated with 60-second periods. This detects backlog, not each lost WebSocket send. Per-connection send errors are logged and swallowed by the broadcaster |
+| Notifications | Failed sends are recorded and reported for SQS retry, with a separate five-attempt claim budget. An exhausted or active claim is skipped; not every undelivered notice necessarily becomes a DLQ message |
 
 ---
+
+The stream-failure queue retains metadata for 14 days; it is not a full-payload archive or an
+automatic replay mechanism. Recovery must locate the source record while it remains in the stream,
+or reconstruct the domain event from its stored event item if still available. No replay tool is
+implemented. See [AWS failure destinations](https://docs.aws.amazon.com/lambda/latest/dg/services-dynamodb-errors.html).
 
 ## 7. Realtime
 
@@ -251,7 +266,7 @@ and records the connection with the queue it watches; the queue is fixed at conn
 no subscribe route.
 
 On every event of a queue, `λ broadcaster` (fed by the FIFO `q-push`, grouped by queue so events for
-one queue are processed in order, one batch at a time) reads the queue's current state once and
+one queue are processed in SNS publication order, one batch at a time) reads the queue's current state once and
 posts to each connection what it may see: staff get the board, each customer only their own ticket.
 A connection that API Gateway reports gone is deleted; connections whose `$disconnect` never arrived
 expire through TTL.
@@ -261,6 +276,11 @@ status code. On every reconnection the page reloads over REST whatever it missed
 connections after ten idle minutes, so the page pings every five (answered by API Gateway with a mock
 integration, no Lambda), and after two hours in any case, so it reconnects with backoff. While the
 socket is down, the page polls.
+
+A transient `PostToConnection` error need not close the browser socket. The broadcaster currently
+logs that error and acknowledges the message, while the browser disables polling on an open socket.
+The view may remain stale until another successful push, reconnection or reload. This is a known
+implementation limitation, not a recovery guarantee.
 
 ---
 
@@ -304,8 +324,9 @@ which needs an app password of the group's account. It is treated as the TP2's c
 Terraform creates the secret empty and the Apply job writes the value with the AWS CLI after the
 apply, because a value set through Terraform would be in plain text in the saved plan (a
 downloadable workflow artifact) and in the state. The notifier reads it when it sends, and it only
-travels over TLS. Besides it, the only credentials are the lab's session keys, also in GitHub
-secrets.
+travels over TLS. The lab session keys are also held in GitHub secrets. Separately, Terraform generates a demo
+staff password and stores it in state and saved plans. `sensitive = true` hides ordinary output
+but does not remove that value from those files. Access to state and artifacts must be controlled.
 
 ### 8.4 Abuse limits
 
