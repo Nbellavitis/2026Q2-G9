@@ -34,7 +34,8 @@ env:
   NODE_VERSION: 22
   AWS_REGION: us-east-1
   TF_DIR: infra/terraform
-  # Tiene que coincidir con var.api_stage_name: el frontend se compila con esta ruta base.
+  # El stage de la API, en un solo lugar: el frontend se compila con esta ruta base, y el plan y el
+  # destroy se lo pasan a Terraform como var.api_stage_name.
   API_STAGE: prod
 # Con `shell: bash` explícito, GitHub agrega pipefail: un `terraform plan | tee` que falla, falla.
 defaults:
@@ -62,6 +63,18 @@ jobs:
         run: |
           terraform init -backend=false -input=false
           terraform validate
+
+      # Los tests de Terraform, en modo plan y con los providers simulados: no usan AWS ni el build.
+      # El de la raíz comprueba que el plan entero se puede armar; los de cada módulo, sus promesas.
+      - name: Tests de Terraform
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform test
+          for module in modules/*/; do
+            echo "::group::$module"
+            (cd "$module" && terraform init -backend=false -input=false >/dev/null && terraform test)
+            echo "::endgroup::"
+          done
 
       - uses: terraform-linters/setup-tflint@v6.3.1
         with:
@@ -157,6 +170,7 @@ jobs:
           SES_VERIFIED_RECIPIENTS: ${{ vars.SES_VERIFIED_RECIPIENTS }}
           ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
           SMTP_SENDER_EMAIL: ${{ vars.SMTP_SENDER_EMAIL }}
+          TF_VAR_api_stage_name: ${{ env.API_STAGE }}
         run: |
           if [ -n "$SES_SENDER_EMAIL" ]; then export TF_VAR_ses_sender_email="$SES_SENDER_EMAIL"; fi
           if [ -n "$SMTP_SENDER_EMAIL" ]; then export TF_VAR_smtp_sender_email="$SMTP_SENDER_EMAIL"; fi
@@ -410,6 +424,8 @@ jobs:
       # antes de borrar nada. Destruir lo que dice el estado alcanza.
       - name: Destroy
         working-directory: ${{ env.TF_DIR }}
+        env:
+          TF_VAR_api_stage_name: ${{ env.API_STAGE }}
         run: terraform destroy -input=false -no-color -lock-timeout=10m -auto-approve -refresh=false
 
       # Los buckets los creó el pipeline, así que los borra el pipeline, en el orden anotado.

@@ -36,8 +36,8 @@ module "health" {
 | `handler` | `string` | `"index.handler"` | Función que invoca Lambda |
 | `runtime` | `string` | `"nodejs22.x"` | Runtime de Node.js |
 | `architecture` | `string` | `"arm64"` | `arm64` o `x86_64` |
-| `memory_size` | `number` | `256` | Memoria en MB |
-| `timeout` | `number` | `10` | Segundos |
+| `memory_size` | `number` | `256` | Memoria en MB, entera, de 128 a 10240 |
+| `timeout` | `number` | `10` | Segundos enteros, de 1 a 900 |
 | `environment` | `map(string)` | `{}` | Variables de entorno, nunca secretos |
 | `role_arn` | `string` | — | Rol de ejecución (`LabRole`) |
 | `artifacts_bucket` | `string` | — | Bucket versionado de artefactos |
@@ -52,6 +52,7 @@ module "health" {
 | `arn` | ARN de la función |
 | `invoke_arn` | ARN para integrarla con API Gateway |
 | `log_group_name` | Log group de la función |
+| `source_code_hash` | Hash del bundle desplegado: cambia cuando cambia el código. Lo usa la carga de demo para volver a correr |
 
 ## Decisiones
 
@@ -60,3 +61,8 @@ module "health" {
   log group sola, y el siguiente `apply` fallaría al intentar crearlo.
 - **`dynamic "environment"`.** El bloque solo se genera si hay variables: un bloque vacío hace que
   el provider muestre un cambio en cada `plan`.
+
+## Tests
+
+`terraform test` en esta carpeta, en modo plan y con el provider simulado: no necesita AWS. Las
+versiones son las de la raíz (`.terraform.lock.hcl`). El pipeline los corre en cada push.

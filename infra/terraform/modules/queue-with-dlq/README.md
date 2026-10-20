@@ -28,13 +28,13 @@ module "notifications" {
 |---|---|---|---|
 | `name` | `string` | — | Nombre, sin `.fifo` |
 | `fifo` | `bool` | `false` | Cola FIFO |
-| `visibility_timeout_seconds` | `number` | — | 6 veces el timeout del consumidor |
-| `max_receive_count` | `number` | `5` | Intentos antes de la DLQ |
-| `message_retention_seconds` | `number` | 4 días | Retención en la cola |
-| `dlq_retention_seconds` | `number` | 14 días | Retención en la DLQ |
+| `visibility_timeout_seconds` | `number` | — | 6 veces el timeout del consumidor. Entero, de 0 a 43200 |
+| `max_receive_count` | `number` | `5` | Intentos antes de la DLQ. Entero, de 1 a 1000 |
+| `message_retention_seconds` | `number` | 4 días | Retención en la cola. Entero, de 60 s a 14 días |
+| `dlq_retention_seconds` | `number` | 14 días | Retención en la DLQ. **Mayor que la de la cola** |
 | `publisher_topic_arns` | `list(string)` | `[]` | Tópicos SNS que pueden publicar |
 | `alarm_topic_arn` | `string` | — | Destino de las alarmas |
-| `max_message_age_seconds` | `number` | `null` | Umbral de atraso del consumidor |
+| `max_message_age_seconds` | `number` | `null` | Umbral de atraso del consumidor, en segundos enteros. `null`: sin alarma |
 | `tags` | `map(string)` | `{}` | Tags propios |
 
 ## Salidas
@@ -52,3 +52,10 @@ module "notifications" {
   ningún otro tópico, de esta cuenta o de otra, puede publicar.
 - **`count` para lo opcional:** la política existe solo si hay publicadores, y la alarma de atraso
   solo si se pide.
+- **La DLQ guarda más tiempo que su cola, y se valida.** En una cola estándar, un mensaje conserva
+  su antigüedad al pasar a la DLQ: con una retención igual o menor, vencería apenas llega.
+
+## Tests
+
+`terraform test` en esta carpeta, en modo plan y con el provider simulado: no necesita AWS. Las
+versiones son las de la raíz (`.terraform.lock.hcl`). El pipeline los corre en cada push.

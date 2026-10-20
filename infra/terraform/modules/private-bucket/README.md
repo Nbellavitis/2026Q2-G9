@@ -31,9 +31,9 @@ module "logs" {
 
 | Nombre | Tipo | Por defecto | Descripción |
 |---|---|---|---|
-| `name` | `string` | — | Nombre de un bucket que ya existe |
+| `name` | `string` | — | Nombre de un bucket que ya existe. **Contrato:** el bucket existe antes del apply |
 | `versioning_enabled` | `bool` | `true` | Guarda versiones anteriores |
-| `expiration_days` | `number` | `null` | Días hasta que se borran los objetos |
+| `expiration_days` | `number` | `null` | Días enteros hasta que se borran los objetos, al menos 1 |
 | `access_logs_bucket` | `string` | `null` | Bucket destino de los registros de acceso |
 | `access_logs_prefix` | `string` | `""` | Prefijo de esos registros |
 | `additional_policy_documents` | `list(string)` | `[]` | Políticas JSON que se suman a la base |
@@ -42,8 +42,8 @@ module "logs" {
 
 | Nombre | Descripción |
 |---|---|
-| `name` | Nombre del bucket |
-| `arn` | ARN del bucket |
+| `name` | Nombre del bucket. **Se entrega con el bucket listo para usar**: versionado (si corresponde) y política puestos. Es la salida para subir objetos o para mandarle registros de acceso |
+| `arn` | ARN del bucket. **Se conoce en el plan y no espera a nada**: sirve para políticas e integraciones, que solo lo nombran. Para escribir en el bucket, usar `name` |
 
 ## Decisiones
 
@@ -61,3 +61,11 @@ module "logs" {
   `version_id`, que es lo que usa una Lambda para apuntar a su zip.
 - **`depends_on` entre la política y el bloqueo de acceso público.** No hay referencia entre los dos,
   y S3 rechaza dos cambios de configuración simultáneos sobre el mismo bucket.
+- **Las dos salidas tienen contratos distintos a propósito.** `arn` se arma del nombre y se conoce
+  en el plan, así una política que lo nombra no espera a nada; `name` lleva el `depends_on`, porque
+  es el que se usa para escribir.
+
+## Tests
+
+`terraform test` en esta carpeta, en modo plan y con el provider simulado: no necesita AWS. Las
+versiones son las de la raíz (`.terraform.lock.hcl`). El pipeline los corre en cada push.
