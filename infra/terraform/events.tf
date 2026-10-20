@@ -46,6 +46,7 @@ resource "aws_sns_topic_subscription" "queues" {
 resource "aws_sqs_queue" "stream_failures" {
   name                      = format("%s-stream-failures", var.project)
   message_retention_seconds = 1209600
+  sqs_managed_sse_enabled   = true
 }
 
 resource "aws_cloudwatch_metric_alarm" "stream_failures" {

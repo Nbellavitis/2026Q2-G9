@@ -343,7 +343,25 @@ lo que la consigna permite. El código de SES sigue disponible para una cuenta d
 
 ---
 
-## 9. Tests y verificación local
+## 9. Seguridad: hallazgos de tfsec
+
+El repositorio de la entrega corre [tfsec](https://github.com/aquasecurity/tfsec) en cada pull
+request. Lo que marca sobre esta configuración, y qué se decidió con cada cosa:
+
+| Hallazgo | Decisión |
+|---|---|
+| Colas SQS sin cifrar (HIGH) | **Resuelto.** Las tres colas, sus DLQs y la de fallas del stream declaran `sqs_managed_sse_enabled = true`: cifrado en reposo con la clave que administra SQS, sin KMS ni costo |
+| Tablas DynamoDB sin cifrado (HIGH) | DynamoDB cifra **siempre** en reposo, con una clave de AWS. tfsec pide además una clave KMS, que agrega costo por pedido y no cambia qué datos quedan protegidos |
+| Tópicos SNS sin cifrar (HIGH) | Un mensaje vive en SNS solo hasta entregarse a las colas SQS, que sí están cifradas. En `q-alerts`, además, las alarmas de CloudWatch no pueden publicar en un tópico cifrado con la clave administrada de AWS: harían falta una clave KMS propia y su política |
+| API Gateway sin access logs (MEDIUM) | Cada función deja sus logs en CloudWatch, y API Gateway publica sus métricas. Los access logs necesitan un rol de CloudWatch para toda la cuenta, que no se probó en el Learner Lab |
+| `q-connections` sin PITR (MEDIUM) | A propósito: guarda sockets abiertos que vencen en dos horas, no hay nada que recuperar. `q-main`, la que tiene los datos del negocio, sí tiene PITR |
+| Sin caché en la API (LOW) | Las respuestas cambian con cada movimiento de la fila, y la caché de API Gateway se cobra por hora |
+| Sin trazas de X-Ray (LOW) | X-Ray no fue parte de la cursada; los logs de cada función alcanzan para seguir un pedido |
+| Log groups sin clave propia (LOW) | CloudWatch Logs ya cifra en reposo; una clave KMS propia solo cambiaría quién la administra |
+
+---
+
+## 10. Tests y verificación local
 
 ```bash
 cd functions && npm ci && npm test        # unitarios e integración (necesita Docker: DynamoDB Local)
@@ -363,7 +381,7 @@ suyos en `modules/*/tests`. El pipeline corre todo esto en cada push.
 
 ---
 
-## 10. Documentación adicional
+## 11. Documentación adicional
 
 | Documento | Contenido |
 |---|---|

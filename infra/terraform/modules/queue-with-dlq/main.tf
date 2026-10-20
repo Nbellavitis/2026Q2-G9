@@ -6,10 +6,14 @@ locals {
   suffix = var.fifo ? ".fifo" : ""
 }
 
+# Las dos colas se cifran en reposo con la clave que administra SQS (SSE-SQS): sin KMS, sin costo y
+# sin permisos extra para SNS ni para las funciones. Es lo que AWS ya aplica por defecto a una cola
+# nueva; declararlo deja el cifrado escrito en el código.
 resource "aws_sqs_queue" "dlq" {
   name                      = "${var.name}-dlq${local.suffix}"
   fifo_queue                = var.fifo
   message_retention_seconds = var.dlq_retention_seconds
+  sqs_managed_sse_enabled   = true
   tags                      = var.tags
 }
 
@@ -18,6 +22,7 @@ resource "aws_sqs_queue" "this" {
   fifo_queue                 = var.fifo
   visibility_timeout_seconds = var.visibility_timeout_seconds
   message_retention_seconds  = var.message_retention_seconds
+  sqs_managed_sse_enabled    = true
 
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.dlq.arn

@@ -8,6 +8,7 @@ Una cola SQS de trabajo con DLQ, redrive, permisos de publicación y alarmas.
 | Tope de intentos (`max_receive_count`) antes de pasar a la DLQ | Alarma si el mensaje más viejo espera demasiado (`max_message_age_seconds`) |
 | La DLQ solo acepta mensajes de su cola | |
 | Alarma de mensajes visibles en la DLQ, evaluada cada 60 segundos | |
+| Cola y DLQ cifradas en reposo con la clave de SQS (SSE-SQS) | |
 
 ## Uso
 
