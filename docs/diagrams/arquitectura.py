@@ -174,7 +174,7 @@ def build(icons):
     s.line([(130 + h, 485), (400 - h, 790)], REQ)
     s.chip(250, 640, "wss", REQ)
 
-    s.line([(400, 450 - h), (400, 230 + h + 40)], REQ, dash="5 4")
+    s.line([(400, 450 - h), (400, 230 + h + 40)], REQ)
     s.chip(400, 345, "authorizer: valida el JWT", REQ)
     s.line([(400 + h, 230), (620 - h, 230)], REQ)
     s.chip(510, 222, "trigger", REQ)
@@ -186,7 +186,7 @@ def build(icons):
     s.chip(527, 502, "/api/v1/public/*", REQ)
     s.line([(400 + h, 800), (620 - h, 800)], REQ)
     # staff da de alta miembros con la API de administración de Cognito
-    s.line([(600, 380 - h), (400 + h, 243)], REQ, dash="5 4")
+    s.line([(600, 380 - h), (400 + h, 243)], REQ)
     s.chip(540, 318, "alta de miembros", REQ)
 
     # ------------------------------------------------------------ datos
@@ -209,7 +209,7 @@ def build(icons):
     s.line([(1560, 650 + h + 40), (1560, 830 - h)], BUS)
 
     # lifecycle se reprograma si la gracia supera los 15 minutos de delay de SQS
-    s.line([(1300 + h, 830), (1375, 830), (1375, 655), (1300 + h, 655)], BUS, dash="5 4")
+    s.line([(1300 + h, 830), (1375, 830), (1375, 655), (1300 + h, 655)], BUS)
     s.chip(1375, 745, "reprograma", BUS)
 
     # los consumidores escriben en q-main
@@ -232,12 +232,31 @@ def build(icons):
     s.line([(1360 + h, row), (1520 - h, row)], ALERT)
     s.line([(1520 + h, row), (1850 - 26, row)], ALERT)
 
-    # despliegue
-    s.line([(130, 960 + h + 40), (130, 1120 - h)], OPS)
-    s.line([(130 + h, 1120), (275, 1120)], OPS)
-    s.chip(205, 1110, "apply", OPS)
-    s.line([(130 + h, 960), (275, 960)], OPS, dash="5 4")
+    # infraestructura: el pipeline crea los buckets y corre Terraform, que sube el código de las λ
+    s.line([(130 + h, 960), (275, 960)], OPS)
     s.chip(205, 952, "buckets.sh", OPS)
+    s.line([(130, 960 + h + 40), (130, 1120 - h)], OPS)
+    s.chip(130, 1067, "terraform apply", OPS)
+    s.line([(130 + h, 1118), (400 - h, 1110)], OPS)
+    s.chip(215, 1106, "zips de las λ", OPS)
+    s.line([(400, 1110 - h), (400, 975), (620, 975), (620, 800 + h + 40)], OPS)
+    s.chip(510, 967, "código de las 9 λ", OPS)
+
+    # ------------------------------------------------------------ leyenda
+    lx, ly = 1738, 1188
+    s.box(lx, ly, 244, 132, INK, "#ffffff", width=1)
+    s.text(lx + 12, ly + 20, "Conexiones", 12, INK, weight="bold")
+    legend = [
+        (REQ, None, "pedido del usuario"),
+        (SYNC, None, "lectura o escritura de datos"),
+        (BUS, None, "evento o mensaje"),
+        (ALERT, None, "alarma"),
+        (OPS, None, "pipeline e infraestructura"),
+    ]
+    for i, (color, dash, label) in enumerate(legend):
+        y = ly + 42 + 19 * i
+        s.line([(lx + 12, y - 4), (lx + 52, y - 4)], color, dash=dash)
+        s.text(lx + 62, y, label, 11, INK)
 
     # ------------------------------------------------------------ notas
     notes = [
