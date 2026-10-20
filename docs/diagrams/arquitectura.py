@@ -137,11 +137,11 @@ def build(icons):
     s.node("apigw", 400, 800, "API Gateway WebSocket", "$connect · $disconnect · ping")
 
     # ------------------------------------------------------------ cómputo y datos
-    s.node("lambda", 620, 380, "λ public", "anotarse · ticket · QR")
-    s.node("lambda", 620, 520, "λ staff", "panel · llamados · métricas")
+    s.node("lambda", 620, 380, "λ staff", "panel · llamados · métricas")
+    s.node("lambda", 620, 520, "λ public", "anotarse · ticket · QR")
     s.node("lambda", 620, 800, "λ ws-connections", "valida el ticket en q-main")
-    s.node("ddb", 860, 450, "DynamoDB q-main", "tabla única · PITR · TTL")
-    s.node("ddb", 860, 800, "DynamoDB q-connections", "GSI byQueue · TTL")
+    s.node("ddb", 860, 450, "DynamoDB q-main", "colas · entradas · eventos", "miembros · avisos · PITR")
+    s.node("ddb", 860, 800, "DynamoDB q-connections", "sockets abiertos · GSI byQueue", "TTL · sin Streams")
 
     # ------------------------------------------------------------ eventos
     s.node("ddbstream", 1040, 450, "DynamoDB Streams", "NEW_AND_OLD_IMAGES")
@@ -153,7 +153,7 @@ def build(icons):
     s.node("lambda", 1040, 830, "λ broadcaster", "lee q-main y q-connections")
     s.node("lambda", 1300, 830, "λ lifecycle", "vence gracias · libera")
     s.node("lambda", 1560, 830, "λ notifier", "decide y marca en q-main")
-    s.node("secrets", 1560, 975, "Secrets Manager", "q-smtp (contraseña)")
+    s.node("secrets", 1560, 975, "Secrets Manager", "q-smtp (si hay SMTP)")
 
     # ------------------------------------------------------------ transversales
     row = 1110
@@ -163,12 +163,12 @@ def build(icons):
     s.node("iam", 880, row, "IAM LabRole", "rol de las λ y de", "API Gateway → S3", color=OPS)
     s.node("cw", 1040, row, "CloudWatch Logs", "logs de las 9 λ", color=OPS)
     s.node("sqs", 1200, row, "SQS DLQs", "3 colas + stream-failures", color=ALERT)
-    s.node("cw", 1360, row, "CloudWatch Alarms", "mensajes en DLQ", color=ALERT)
-    s.node("sns", 1520, row, "SNS q-alerts", "suscripción email", color=ALERT)
+    s.node("cw", 1360, row, "CloudWatch Alarms", "DLQ · cola atrasada", "fallas del stream", color=ALERT)
+    s.node("sns", 1520, row, "SNS q-alerts", "email (si hay ALERT_EMAIL)", color=ALERT)
 
     # ------------------------------------------------------------ pedidos del navegador
     s.line([(130 + h, 455), (400 - h, 240)], REQ)
-    s.chip(232, 380, "login (InitiateAuth)", REQ)
+    s.chip(232, 380, "staff: registro y login", REQ)
     s.line([(130 + h, 470), (400 - h, 450)], REQ)
     s.chip(250, 452, "HTTPS", REQ)
     s.line([(130 + h, 485), (400 - h, 790)], REQ)
@@ -181,10 +181,13 @@ def build(icons):
     s.line([(400, 450 + h + 40), (400, 640 - h)], REQ)
     s.chip(400, 590, "GET / (LabRole)", REQ)
     s.line([(400 + h, 440), (620 - h, 385)], REQ)
-    s.chip(510, 398, "/public/*", REQ)
+    s.chip(510, 398, "/api/v1/* (JWT)", REQ)
     s.line([(400 + h, 460), (620 - h, 515)], REQ)
-    s.chip(510, 505, "/api/v1/*", REQ)
+    s.chip(527, 502, "/api/v1/public/*", REQ)
     s.line([(400 + h, 800), (620 - h, 800)], REQ)
+    # staff da de alta miembros con la API de administración de Cognito
+    s.line([(600, 380 - h), (400 + h, 243)], REQ, dash="5 4")
+    s.chip(540, 318, "alta de miembros", REQ)
 
     # ------------------------------------------------------------ datos
     s.line([(620 + h, 385), (860 - h, 440)], SYNC)
@@ -210,7 +213,7 @@ def build(icons):
     s.chip(1375, 745, "reprograma", BUS)
 
     # los consumidores escriben en q-main
-    s.line([(1300 - h, 815), (1190, 815), (1190, 580), (900, 580), (870, 450 + h + 40)], SYNC)
+    s.line([(1300 - h, 815), (1190, 815), (1190, 580), (900, 580), (870, 450 + h + 52)], SYNC)
     s.line([(1560 - h, 845), (1470, 845), (1470, 580), (1190, 580)], SYNC, arrow=False)
     s.chip(1035, 572, "escriben en q-main", SYNC)
 
