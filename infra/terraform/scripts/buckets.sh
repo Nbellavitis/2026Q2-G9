@@ -3,11 +3,11 @@
 #
 # Por qué existe: después de crear un bucket con `aws_s3_bucket`, el provider lee su configuración de
 # object lock, y el SCP del Learner Lab niega `s3:GetBucketObjectLockConfiguration` con un deny
-# explícito. Ninguna versión del provider tolera ese AccessDenied (v4.67, v5.100 y v6.67 lo tratan
-# como error en la partición `aws`), y la lectura es incondicional. Las demás lecturas de S3 están
-# permitidas, así que Terraform sigue administrando todo lo que va sobre cada bucket (módulo
-# private-bucket): acceso público, propiedad de los objetos, versionado, política, registros de
-# acceso, expiración y contenido. Esto solo los crea y, al destruir, los vacía y los borra.
+# explícito. Ninguna de las versiones ensayadas del provider tolera ese AccessDenied (v4.67, v5.100
+# y v6.67 lo tratan como error en la partición `aws`), y la lectura es incondicional. Las demás
+# lecturas de S3 están permitidas, así que Terraform sigue administrando todo lo que va sobre cada
+# bucket (módulo private-bucket): acceso público, propiedad de los objetos, versionado, política,
+# registros de acceso, expiración y contenido. Esto solo los crea y, al destruir, los vacía y los borra.
 #
 # Los nombres los decide Terraform (output `bucket_names`); acá no se repite la regla. Se anotan en el
 # bucket del estado antes de crear nada, así `delete` los encuentra aunque un apply se corte después
@@ -30,10 +30,23 @@ create() {
   shift
   [ "$#" -gt 0 ] || { echo "No hay buckets para crear: el plan no trajo bucket_names" >&2; exit 1; }
 
-  printf '%s\n' "$@" | aws s3 cp - "s3://${state_bucket}/${RECORD_KEY}" --no-progress >/dev/null
+  # Los anotados antes y que ya no están en el plan (un bucket renombrado) se conservan, delante de
+  # los nuevos: el destroy tiene que seguir encontrándolos, y el de logs sigue quedando último.
+  local previous name wanted
+  local -a kept=()
+  previous=$(aws s3 cp "s3://${state_bucket}/${RECORD_KEY}" - 2>/dev/null || true)
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    for wanted in "$@"; do
+      [ "$name" != "$wanted" ] || continue 2
+    done
+    kept+=("$name")
+  done <<<"$previous"
+
+  printf '%s\n' "${kept[@]}" "$@" | sed '/^$/d' |
+    aws s3 cp - "s3://${state_bucket}/${RECORD_KEY}" --no-progress >/dev/null
   echo "Anotados en s3://${state_bucket}/${RECORD_KEY}"
 
-  local name
   for name in "$@"; do
     if exists "$name"; then
       echo "Ya existe: $name"

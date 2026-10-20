@@ -10,12 +10,12 @@ output "health_url" {
 
 output "demo_queue_url" {
   description = "La cola de demo, como la abre un cliente al escanear el QR."
-  value       = var.cargar_demo ? format("%s/q/?id=%s", aws_api_gateway_stage.this.invoke_url, local.demo.queues[0].id) : null
+  value       = var.demo_enabled ? format("%s/q/?id=%s", aws_api_gateway_stage.this.invoke_url, local.demo.queues[0].id) : null
 }
 
 output "demo_staff_email" {
   description = "Usuario de staff de demo, para entrar al panel."
-  value       = var.cargar_demo ? var.demo_email : null
+  value       = var.demo_enabled ? var.demo_email : null
 }
 
 output "demo_staff_password" {

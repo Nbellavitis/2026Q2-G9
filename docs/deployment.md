@@ -177,7 +177,7 @@ duplicate emails and swallowed per-connection WebSocket errors. These are not fi
 
 The full list is in [outputs.tf](../infra/terraform/outputs.tf). URLs, table/function names,
 Cognito IDs and `stream_mapping_uuid` identify resources in the console. Demo outputs can be null
-when `cargar_demo = false`; SMTP outputs can be null when it is not configured.
+when `demo_enabled = false`; SMTP outputs can be null when it is not configured.
 
 The demo user defaults to `demo@queue.example`. Its random password persists with the same
 `random_password.demo` resource; it is not regenerated on every apply. It is sensitive but stored
@@ -204,8 +204,8 @@ is listed in the [Terraform README](../infra/terraform/README.md#entradas-y-sali
 Local `terraform.tfvars` is ignored and is not loaded by the hosted runner. The workflow passes
 the optional email variables and `TF_VAR_api_stage_name` from `API_STAGE` in both plan and destroy.
 Change `API_STAGE` to update the frontend build path and Terraform stage together; changing the
-Terraform default alone is overridden in CI. Region still requires coordinating Terraform and
-workflow `AWS_REGION`. This workflow manages one deployment per account/region, not isolated PR stacks.
+Terraform default alone is overridden in CI. The region works the same way: `AWS_REGION` configures
+the credentials and reaches Terraform as `TF_VAR_region`. This workflow manages one deployment per account/region, not isolated PR stacks.
 
 ## 5. Destroy and deploy again
 

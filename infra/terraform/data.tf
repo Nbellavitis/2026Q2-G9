@@ -5,6 +5,9 @@ data "aws_caller_identity" "current" {}
 
 data "aws_region" "current" {}
 
+# La partición (aws, aws-cn, aws-us-gov) para armar ARNs sin escribirla a mano.
+data "aws_partition" "current" {}
+
 data "aws_iam_role" "lab" {
   name = var.lab_role_name
 }
@@ -16,7 +19,7 @@ data "aws_iam_policy_document" "access_logs_delivery" {
     sid       = "EntregaDeRegistrosDeAcceso"
     effect    = "Allow"
     actions   = ["s3:PutObject"]
-    resources = ["arn:aws:s3:::${local.bucket_names.logs}/*"]
+    resources = ["arn:${data.aws_partition.current.partition}:s3:::${local.bucket_names.logs}/*"]
 
     principals {
       type        = "Service"
@@ -32,7 +35,7 @@ data "aws_iam_policy_document" "access_logs_delivery" {
     condition {
       test     = "ArnLike"
       variable = "aws:SourceArn"
-      values   = [for name in values(local.logged_bucket_names) : "arn:aws:s3:::${name}"]
+      values   = [for name in values(local.logged_bucket_names) : "arn:${data.aws_partition.current.partition}:s3:::${name}"]
     }
   }
 }

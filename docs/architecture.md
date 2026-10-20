@@ -31,6 +31,12 @@ shape the deployment as much as the application does.
 
 ## 2. System overview
 
+![Architecture of Queue on AWS](diagrams/arquitectura.png)
+
+The diagram above is the deliverable: AWS Cloud, the region and every resource the Terraform
+configuration creates, generated from [`diagrams/arquitectura.py`](diagrams/arquitectura.py). The
+flow chart below is the same system reduced to its data flow.
+
 ```mermaid
 flowchart LR
     browser([Browser]) -->|HTTPS| rest[API Gateway REST]

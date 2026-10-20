@@ -29,7 +29,7 @@ module "main_table" {
 }
 
 # Las conexiones WebSocket (§5.3): una por navegador abierto, indexadas por la cola que miran. El
-# broadcaster de la Fase 5 hace una sola consulta al índice `byQueue` para encontrar a todos los que
+# broadcaster hace una sola consulta al índice `byQueue` para encontrar a todos los que
 # hay que avisar. El índice es eventualmente consistente a propósito: la primera vista de cada
 # pantalla llega por REST, así que perderse el primer push no deja a nadie desactualizado.
 #

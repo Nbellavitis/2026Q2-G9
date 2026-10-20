@@ -21,7 +21,7 @@ module "public_example" {
   name             = "q-public-example"
   source_file      = "../../functions/dist/public/index.mjs"
   role_arn         = data.aws_iam_role.lab.arn
-  artifacts_bucket = module.private_buckets["artefactos"].name
+  artifacts_bucket = module.private_buckets["artifacts"].name
   environment      = { TABLE_NAME = module.main_table.dynamodb_table_id }
 }
 ```

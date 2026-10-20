@@ -4,7 +4,7 @@
 # corrección y GitHub solo ofrece "Run workflow" (workflow_dispatch) para workflows que ya están en
 # la rama por defecto:
 #
-#   cada push al PR          validate y build; con credenciales, también plan
+#   cada push al PR          validate y build; plan, con las credenciales del lab
 #   aprobar el environment   apply sobre ese mismo plan, y prueba de humo
 #   etiqueta "destroy"       destroy (también aprobado)
 #
@@ -32,6 +32,7 @@ env:
   TF_VERSION: 1.16.4
   TFLINT_VERSION: v0.64.0
   NODE_VERSION: 22
+  # La región, en un solo lugar: configura las credenciales y llega a Terraform como var.region.
   AWS_REGION: us-east-1
   TF_DIR: infra/terraform
   # El stage de la API, en un solo lugar: el frontend se compila con esta ruta base, y el plan y el
@@ -151,6 +152,22 @@ jobs:
         with:
           name: build
 
+      # Sin las credenciales del lab, configure-aws-credentials falla con un mensaje poco claro.
+      - name: Credenciales del lab
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+        run: |
+          missing=()
+          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Faltan los secrets ${missing[*]}: copiarlos de AWS Details en el Learner Lab (ver docs/deployment.md)."
+            exit 1
+          fi
+
       - uses: ./.github/actions/terraform-init
         with:
           terraform-version: ${{ env.TF_VERSION }}
@@ -171,10 +188,11 @@ jobs:
           ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
           SMTP_SENDER_EMAIL: ${{ vars.SMTP_SENDER_EMAIL }}
           TF_VAR_api_stage_name: ${{ env.API_STAGE }}
+          TF_VAR_region: ${{ env.AWS_REGION }}
         run: |
           if [ -n "$SES_SENDER_EMAIL" ]; then export TF_VAR_ses_sender_email="$SES_SENDER_EMAIL"; fi
           if [ -n "$SMTP_SENDER_EMAIL" ]; then export TF_VAR_smtp_sender_email="$SMTP_SENDER_EMAIL"; fi
-          if [ -n "$ALERT_EMAIL" ]; then export TF_VAR_email_alertas="$ALERT_EMAIL"; fi
+          if [ -n "$ALERT_EMAIL" ]; then export TF_VAR_alert_email="$ALERT_EMAIL"; fi
           # Separadas por coma, como las escribe una persona: Terraform recibe la lista en JSON.
           if [ -n "$SES_VERIFIED_RECIPIENTS" ]; then
             TF_VAR_ses_verified_recipients=$(jq -cn --arg list "$SES_VERIFIED_RECIPIENTS" \
@@ -426,6 +444,7 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         env:
           TF_VAR_api_stage_name: ${{ env.API_STAGE }}
+          TF_VAR_region: ${{ env.AWS_REGION }}
         run: terraform destroy -input=false -no-color -lock-timeout=10m -auto-approve -refresh=false
 
       # Los buckets los creó el pipeline, así que los borra el pipeline, en el orden anotado.

@@ -12,7 +12,7 @@ module "api_functions" {
   timeout            = each.value.timeout
   environment        = each.value.environment
   role_arn           = data.aws_iam_role.lab.arn
-  artifacts_bucket   = module.private_buckets["artefactos"].name
+  artifacts_bucket   = module.private_buckets["artifacts"].name
   log_retention_days = var.log_retention_days
 }
 
@@ -27,7 +27,7 @@ module "workers" {
   timeout            = each.value.timeout
   environment        = each.value.environment
   role_arn           = data.aws_iam_role.lab.arn
-  artifacts_bucket   = module.private_buckets["artefactos"].name
+  artifacts_bucket   = module.private_buckets["artifacts"].name
   log_retention_days = var.log_retention_days
 }
 

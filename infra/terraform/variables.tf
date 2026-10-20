@@ -174,7 +174,7 @@ variable "session_hours" {
   }
 }
 
-variable "cargar_demo" {
+variable "demo_enabled" {
   description = "Carga un local de demo con dos colas y un usuario de staff, para poder probar sin configurar nada."
   type        = bool
   default     = true
@@ -186,19 +186,19 @@ variable "demo_email" {
   default     = "demo@queue.example"
 
   validation {
-    condition     = can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.demo_email))
+    condition     = can(regex(local.email_pattern, var.demo_email))
     error_message = "El email de demo tiene que ser una dirección válida."
   }
 }
 
-variable "email_alertas" {
+variable "alert_email" {
   description = "Email que recibe las alarmas (mensajes en una DLQ, fallas del stream). null para no suscribir ninguno."
   type        = string
   default     = null
 
   validation {
-    condition     = var.email_alertas == null || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.email_alertas))
-    error_message = "email_alertas tiene que ser una dirección válida."
+    condition     = var.alert_email == null || can(regex(local.email_pattern, var.alert_email))
+    error_message = "alert_email tiene que ser una dirección válida."
   }
 }
 
@@ -219,7 +219,7 @@ variable "ses_sender_email" {
   default     = null
 
   validation {
-    condition     = var.ses_sender_email == null || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.ses_sender_email))
+    condition     = var.ses_sender_email == null || can(regex(local.email_pattern, var.ses_sender_email))
     error_message = "ses_sender_email tiene que ser una dirección válida."
   }
 }
@@ -230,7 +230,7 @@ variable "smtp_sender_email" {
   default     = null
 
   validation {
-    condition     = var.smtp_sender_email == null || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.smtp_sender_email))
+    condition     = var.smtp_sender_email == null || can(regex(local.email_pattern, var.smtp_sender_email))
     error_message = "smtp_sender_email tiene que ser una dirección válida."
   }
 }
@@ -241,7 +241,7 @@ variable "ses_verified_recipients" {
   default     = []
 
   validation {
-    condition     = alltrue([for email in var.ses_verified_recipients : can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", email))])
+    condition     = alltrue([for email in var.ses_verified_recipients : can(regex(local.email_pattern, email))])
     error_message = "Todas las direcciones tienen que ser válidas."
   }
 }

@@ -67,7 +67,7 @@ resource "aws_sqs_queue_policy" "this" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "dlq_not_empty" {
-  alarm_name          = "${var.name}-dlq-con-mensajes"
+  alarm_name          = "${var.name}-dlq-not-empty"
   alarm_description   = "Un mensaje de ${var.name} agotó sus ${var.max_receive_count} intentos y está en la DLQ."
   namespace           = "AWS/SQS"
   metric_name         = "ApproximateNumberOfMessagesVisible"
@@ -86,7 +86,7 @@ resource "aws_cloudwatch_metric_alarm" "dlq_not_empty" {
 resource "aws_cloudwatch_metric_alarm" "oldest_message" {
   count = var.max_message_age_seconds == null ? 0 : 1
 
-  alarm_name          = "${var.name}-atrasada"
+  alarm_name          = "${var.name}-oldest-message"
   alarm_description   = "El mensaje más viejo de ${var.name} espera más de ${var.max_message_age_seconds} s: el consumidor no da abasto o está caído."
   namespace           = "AWS/SQS"
   metric_name         = "ApproximateAgeOfOldestMessage"

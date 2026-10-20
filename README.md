@@ -15,6 +15,8 @@ updates. The previous delivery (Spring Boot on EC2 behind a load balancer, with 
 and the [deployment procedure](docs/deployment.md). [`ROADMAP.md`](ROADMAP.md) tracks delivery work;
 [`AVANCE-ENTREGA-3.md`](AVANCE-ENTREGA-3.md) is a chronological log whose older entries describe earlier states.
 
+![Architecture of Queue on AWS](docs/diagrams/arquitectura.png)
+
 ## MVP coverage
 
 | Proposal | Where it lives |

@@ -1,5 +1,6 @@
 # Copiar como terraform.tfvars para cambiar algún valor por defecto. Ninguno es obligatorio: con
-# los valores por defecto, Terraform despliega en cualquier cuenta del Learner Lab.
+# los valores por defecto, el pipeline despliega en cualquier cuenta del Learner Lab (los tres
+# buckets de la app los crea antes scripts/buckets.sh, no Terraform).
 
 # region                      = "us-east-1"
 # project                     = "q"
@@ -17,6 +18,6 @@
 # nunca acá) y ALERT_EMAIL (es SNS). SES_SENDER_EMAIL y SES_VERIFIED_RECIPIENTS son para una cuenta
 # con SES: en el lab, el apply falla al crear las identidades.
 # smtp_sender_email       = "queue.cloud.itba@gmail.com"
-# email_alertas           = "queue.cloud.itba@gmail.com"
+# alert_email           = "queue.cloud.itba@gmail.com"
 # ses_sender_email        = "queue.cloud.itba@gmail.com"
 # ses_verified_recipients = ["integrante@gmail.com"]

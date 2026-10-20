@@ -15,7 +15,7 @@ variables {
   name             = "q-prueba"
   source_file      = "dist/q-prueba/index.mjs"
   role_arn         = "arn:aws:iam::123456789012:role/LabRole"
-  artifacts_bucket = "q-artefactos-123456789012-us-east-1"
+  artifacts_bucket = "q-artifacts-123456789012-us-east-1"
 }
 
 run "funcion_desde_su_zip_versionado" {

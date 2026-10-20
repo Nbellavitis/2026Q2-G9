@@ -65,9 +65,8 @@ resource "aws_apigatewayv2_deployment" "ws" {
     ]))
   }
 
-  # Un deployment de una API WebSocket falla si la API todavía no tiene rutas, y el deployment no
-  # referencia ninguna: solo las nombra el hash de arriba, que no crea dependencia de creación.
-  depends_on = [aws_apigatewayv2_route.connections, aws_apigatewayv2_route.ping]
+  # Un deployment de una API WebSocket falla si la API todavía no tiene rutas. No hace falta
+  # depends_on: el hash de arriba referencia las rutas, y esa referencia ya ordena la creación.
 
   lifecycle {
     create_before_destroy = true

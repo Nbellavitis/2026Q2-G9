@@ -162,7 +162,7 @@ locals {
     }
   }
 
-  site_bucket_path = format("arn:aws:apigateway:%s:s3:path/%s", local.region, module.private_buckets["spa"].name)
+  site_bucket_path = format("arn:%s:apigateway:%s:s3:path/%s", data.aws_partition.current.partition, local.region, module.private_buckets["spa"].name)
 
   site_paths = {
     "/" = {

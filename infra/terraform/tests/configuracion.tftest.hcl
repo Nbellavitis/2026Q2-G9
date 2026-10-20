@@ -55,9 +55,9 @@ run "el_plan_se_arma_con_los_valores_por_defecto" {
 
   assert {
     condition = output.bucket_names == {
-      spa        = "q-spa-123456789012-us-east-1"
-      artefactos = "q-artefactos-123456789012-us-east-1"
-      logs       = "q-logs-123456789012-us-east-1"
+      spa       = "q-spa-123456789012-us-east-1"
+      artifacts = "q-artifacts-123456789012-us-east-1"
+      logs      = "q-logs-123456789012-us-east-1"
     }
     error_message = "Los nombres de los buckets salen de la cuenta y la región, y se conocen en el plan (el pipeline los lee del plan para crearlos)."
   }
@@ -114,4 +114,14 @@ run "rutas_anonimas_con_un_techo_mayor_que_la_api" {
   }
 
   expect_failures = [var.public_write_rate_limit]
+}
+
+run "email_de_alertas_invalido" {
+  command = plan
+
+  variables {
+    alert_email = "no-es-un-mail"
+  }
+
+  expect_failures = [var.alert_email]
 }

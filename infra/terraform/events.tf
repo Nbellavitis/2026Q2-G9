@@ -49,7 +49,7 @@ resource "aws_sqs_queue" "stream_failures" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "stream_failures" {
-  alarm_name          = format("%s-stream-con-fallas", var.project)
+  alarm_name          = format("%s-stream-failures", var.project)
   alarm_description   = "Un lote del stream de q-main no se pudo publicar después de todos sus reintentos."
   namespace           = "AWS/SQS"
   metric_name         = "ApproximateNumberOfMessagesVisible"

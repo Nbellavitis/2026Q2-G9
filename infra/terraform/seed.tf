@@ -1,15 +1,15 @@
 # Datos de demo, que la consigna permite: un local con dos colas y un usuario de staff, para que quien
-# corrija pueda entrar y probar sin configurar nada. Se apagan con `cargar_demo = false`.
+# corrija pueda entrar y probar sin configurar nada. Se apagan con `demo_enabled = false`.
 
 resource "random_password" "demo" {
-  count = var.cargar_demo ? 1 : 0
+  count = var.demo_enabled ? 1 : 0
 
   length  = 16
   special = false
 }
 
 resource "aws_cognito_user" "demo" {
-  count = var.cargar_demo ? 1 : 0
+  count = var.demo_enabled ? 1 : 0
 
   user_pool_id   = aws_cognito_user_pool.this.id
   username       = var.demo_email
@@ -30,7 +30,7 @@ resource "aws_cognito_user" "demo" {
 # La función usa las mismas operaciones del dominio que la API, así los datos tienen exactamente la
 # forma que espera el resto del código. Es idempotente: si el local o una cola ya existen, los deja.
 resource "aws_lambda_invocation" "seed" {
-  count = var.cargar_demo ? 1 : 0
+  count = var.demo_enabled ? 1 : 0
 
   function_name = module.workers["seed"].name
 

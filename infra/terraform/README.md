@@ -2,8 +2,16 @@
 
 Esta raíz implementa la arquitectura serverless de Queue. La entrada para ejecutar la entrega es
 la [guía de despliegue](../../docs/deployment.md); este documento explica cómo está construida la
-infraestructura y dónde se cumple cada requisito. El [diagrama vigente](../../docs/architecture.md#2-system-overview)
-está versionado en Mermaid junto con las decisiones de arquitectura.
+infraestructura y dónde se cumple cada requisito.
+
+## Diagrama de arquitectura
+
+![Arquitectura de Queue en AWS](../../docs/diagrams/arquitectura.png)
+
+Cada nodo es un recurso de esta configuración. El diagrama se genera desde código:
+[`docs/diagrams/arquitectura.py`](../../docs/diagrams/arquitectura.py) escribe el SVG y
+`node docs/diagrams/render.mjs` lo exporta a PNG. La [arquitectura](../../docs/architecture.md)
+explica las decisiones detrás de cada conexión.
 
 ## Requisitos y evidencia
 
@@ -14,7 +22,7 @@ está versionado en Mermaid junto con las decisiones de arquitectura.
 | Variables y outputs | Parámetros tipados, descripciones y outputs operativos | [Entradas y salidas](#entradas-y-salidas) |
 | Cuatro funciones como mínimo | Serialización, lectura de archivos, nombres, hashes y colecciones | [Funciones](#funciones-terraform) |
 | Tres meta-argumentos como mínimo | Se utilizan los cuatro de la consigna | [Meta-argumentos](#meta-argumentos) |
-| Pipeline con init, validate, plan y apply | GitHub Actions sobre el PR, con destroy y smoke test | [Workflow](../../.github/workflows/terraform.yml) y [guía](../../docs/deployment.md) |
+| Pipeline con init, validate, plan, apply y destroy | GitHub Actions sobre el PR, con aprobación del apply y smoke test | [Workflow](../../.github/workflows/terraform.yml) y [guía](../../docs/deployment.md) |
 | Correcciones del TP2 | Buckets separados y tratamiento del secreto | [Evolución](#evolución-desde-el-tp2) |
 
 ## Versiones y estructura
@@ -45,6 +53,10 @@ Los módulos locales declaran sus propios requisitos de providers; heredan el pr
 | [private-bucket](modules/private-bucket/README.md) | Propio, tres buckets de aplicación | Recibe el nombre de un bucket existente y opciones de versionado, logs, política y expiración; entrega nombre y ARN. Centraliza acceso privado y TLS. El pipeline crea y elimina el bucket. |
 | [queue-with-dlq](modules/queue-with-dlq/README.md) | Propio, push, notifications y lifecycle | Recibe nombre, modo FIFO, visibilidad, retenciones, tópicos permitidos y destino de alarmas; entrega ARN, URL, nombre y referencias a la DLQ. Evita repetir redrive, permisos y alarmas. |
 | [dynamodb-table/aws](https://registry.terraform.io/modules/terraform-aws-modules/dynamodb-table/aws/5.5.2) | Externo, `main_table` y `connections_table` | Recibe esquema de claves, índices, TTL, Streams y PITR; se consumen sus outputs de nombre y ARN del stream. Cubre ambas tablas sin crear roles IAM, restringidos en el lab. Versión exacta en `tables.tf`. |
+
+El plan muestra un aviso de deprecación de `hash_key` que sale del módulo externo: la versión 5.5.2
+todavía declara las claves de las tablas con ese argumento del provider 6.x. Es solo un aviso y no
+cambia lo que se crea.
 
 Los mapas de funciones API y workers están separados para evitar ciclos: la API REST depende de
 sus funciones y algunos workers necesitan la URL de esa API. El trigger de Cognito se declara aparte
@@ -82,8 +94,8 @@ Las expresiones siguientes son ejemplos del código vigente; los archivos enlaza
 | Meta-argumento | Uso real | Motivo |
 |---|---|---|
 | `for_each` | `for_each = local.queues` en [events.tf](events.tf) | Crear una cola por clave estable del mapa: `push`, `notifications`, `lifecycle`. También funciones, objetos y suscripciones. |
-| `count` | `count = var.cargar_demo ? 1 : 0` en [seed.tf](seed.tf) | Habilitar o deshabilitar usuario, contraseña e invocación de demo. También suscripciones, SMTP y opciones de los módulos. |
-| `depends_on` | `depends_on = [aws_cloudwatch_log_group.this]` en [lambda-function/main.tf](modules/lambda-function/main.tf) | Preparar el log group antes de invocar una función que lo usa por convención de nombres. También permiso de Cognito y rutas WebSocket; el destino de logs se ordena mediante el output `name` del módulo. |
+| `count` | `count = var.demo_enabled ? 1 : 0` en [seed.tf](seed.tf) | Habilitar o deshabilitar usuario, contraseña e invocación de demo. También suscripciones, SMTP y opciones de los módulos. |
+| `depends_on` | `depends_on = [aws_cloudwatch_log_group.this]` en [lambda-function/main.tf](modules/lambda-function/main.tf) | Preparar el log group antes de invocar una función que lo usa por convención de nombres. También el usuario de demo espera el permiso del trigger de Cognito; el destino de logs se ordena mediante el output `name` del módulo. |
 | `lifecycle` | `create_before_destroy = true` en [api.tf](api.tf) y [realtime.tf](realtime.tf) | Crear el nuevo deployment antes de eliminar el que todavía usa el stage. |
 
 Los deployments se renuevan mediante `triggers` con hashes. Actualmente no se utiliza
@@ -130,15 +142,15 @@ los parámetros de cada módulo se detallan en su README.
 | `public_write_rate_limit` | `number` | `10` |
 | `public_write_burst_limit` | `number` | `20` |
 | `session_hours` | `number` | `12` |
-| `cargar_demo` | `bool` | `true` |
+| `demo_enabled` | `bool` | `true` |
 | `demo_email` | `string` | `"demo@queue.example"` |
-| `email_alertas` | `string` | `null` |
+| `alert_email` | `string` | `null` |
 | `consumer_max_concurrency` | `number` | `2` |
 | `ses_sender_email` | `string` | `null` |
 | `smtp_sender_email` | `string` | `null` |
 | `ses_verified_recipients` | `list(string)` | `[]` |
 
-El workflow pasa el stage mediante `TF_VAR_api_stage_name` y los emails mediante variables de repositorio: `SMTP_SENDER_EMAIL`, `ALERT_EMAIL`,
+El workflow pasa el stage y la región mediante `TF_VAR_api_stage_name` y `TF_VAR_region`, y los emails mediante variables de repositorio: `SMTP_SENDER_EMAIL`, `ALERT_EMAIL`,
 `SES_SENDER_EMAIL` y `SES_VERIFIED_RECIPIENTS` (esta última separada por comas). Las dos de SES se
 dejan sin configurar en el lab observado. `GMAIL_APP_PASSWORD` es un secret de GitHub y se escribe
 con CLI después del apply: nunca es una variable Terraform.
@@ -147,7 +159,8 @@ Un `terraform.tfvars` local no viaja al runner: está ignorado por Git. El workf
 generales para cambiar el resto de los parámetros. Para cambiarlos en CI hay que modificar de forma
 revisable sus defaults o el paso que pasa las variables. Para el stage, `API_STAGE` del workflow
 es la fuente compartida: configura el build del frontend y `TF_VAR_api_stage_name` en plan y
-destroy. Para cambiar región todavía hay que coordinar `AWS_REGION` y la variable Terraform.
+destroy. La región funciona igual: `AWS_REGION` configura las credenciales y llega a Terraform como
+`TF_VAR_region`.
 
 Los [outputs](outputs.tf) cubren:
 
@@ -200,9 +213,36 @@ historial. La rotación de valores expuestos y la limpieza de CloudFormation/rec
 aparte; este README no las da por realizadas. Los archivos del diseño previo se conservan como
 historia, no como instrucciones para desplegar TP3.
 
-## Ejecución, comprobación y trabajo pendiente
+## Ejecución paso a paso
 
-Seguir la [guía paso a paso](../../docs/deployment.md), incluidos sus resultados esperados,
+Resumen de la [guía de despliegue](../../docs/deployment.md), que tiene los resultados esperados de
+cada paso y qué hacer si algo falla. Todo corre en GitHub Actions: no hace falta instalar nada.
+
+1. **Configurar el repositorio, una sola vez.** En *Settings → Environments*, crear `aws-lab` con
+   revisores obligatorios. En *Issues → Labels*, crear la etiqueta `destroy`.
+2. **Cargar las credenciales del lab, en cada sesión.** Iniciar el Learner Lab, abrir *AWS Details*
+   y copiar los tres valores a los secrets `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` y
+   `AWS_SESSION_TOKEN` (*Settings → Secrets and variables → Actions*). Vencen con la sesión.
+3. **Opcional, mails reales.** Variable `SMTP_SENDER_EMAIL` y secret `GMAIL_APP_PASSWORD` (ver el
+   [README principal](../../README.md#notification-emails)); variable `ALERT_EMAIL` para las
+   alarmas. Sin ellos, los avisos se simulan en los logs.
+4. **Abrir o actualizar el pull request**, desde una rama del mismo repositorio: un PR desde un
+   fork no recibe los secrets y el plan falla. Cada push corre *Validar* (`fmt`, `init`, `validate`,
+   tflint, `terraform test`), *Compilar* (tests de las funciones y build) y *Plan*, que deja el plan
+   como artefacto y como comentario en el PR.
+5. **Aprobar el apply.** En la ejecución, *Review deployments → aws-lab → Approve*. El job crea los
+   buckets, aplica el plan guardado, carga la contraseña SMTP si existe y corre la prueba de humo.
+6. **Usar la app.** El resumen del job *Apply* tiene la URL del sitio, la de la cola de demo y el
+   usuario de demo. Para entrar al panel alcanza con registrar una cuenta nueva desde el sitio; la
+   contraseña del usuario de demo está en el estado y se lee como explica la
+   [guía](../../docs/deployment.md#outputs-and-demo-credentials).
+7. **Destruir.** Cancelar cualquier apply pendiente, agregar la etiqueta `destroy` al PR y aprobar
+   `aws-lab`: borra todo, vacía los buckets y por último el bucket del estado. Quitar la etiqueta
+   después, para que no vuelva a disparar.
+
+## Comprobación y trabajo pendiente
+
+Seguir la [guía de despliegue](../../docs/deployment.md), incluidos sus resultados esperados,
 recuperación y ensayo de la cátedra. Las pruebas de la aplicación no sustituyen un plan/apply en la
 cuenta destino. La ejecución independiente `apply → uso → destroy → apply`, el estado actual del PR
 y la carga del hash en campus deben registrarse al realizarlos.

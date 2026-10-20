@@ -83,7 +83,7 @@ module "pre_signup" {
   memory_size        = 128
   timeout            = 5
   role_arn           = data.aws_iam_role.lab.arn
-  artifacts_bucket   = module.private_buckets["artefactos"].name
+  artifacts_bucket   = module.private_buckets["artifacts"].name
   log_retention_days = var.log_retention_days
 }
 

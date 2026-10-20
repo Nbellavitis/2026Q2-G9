@@ -6,6 +6,9 @@ locals {
   # cuenta del Learner Lab, incluida la de la cátedra.
   name_suffix = "${local.account_id}-${local.region}"
 
+  # Lo que se pide a cualquier email de las variables: algo, una arroba, un dominio con un punto.
+  email_pattern = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+
   # Solo variables: estos tags los usa el bloque provider, que no puede depender de datasources.
   tags = {
     Proyecto      = "queue"
@@ -26,7 +29,7 @@ locals {
       # El sitio se reconstruye desde git en cada despliegue: versionarlo no agrega nada.
       versioning_enabled = false
     }
-    artefactos = {
+    artifacts = {
       # Las funciones apuntan a una versión exacta del zip, así que el versionado es obligatorio.
       versioning_enabled = true
     }

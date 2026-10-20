@@ -993,3 +993,26 @@ función y su log group. No quedó ningún log group recreado.
 borrado, borra el bucket, y una segunda corrida ve que ya no existe. shellcheck y actionlint sin
 hallazgos nuevos.
 
+
+---
+
+## Revisión contra la consigna y la rúbrica, y diagrama nuevo
+
+| | |
+|---|---|
+| Diagrama | `docs/diagrams/arquitectura.png`, con la convención de AWS: AWS Cloud, la región us-east-1 (sin VPC) y cada recurso del Terraform conectado con los que usa; afuera, el navegador, GitHub Actions/Terraform y Gmail. Sin agrupar por funcionalidad. Se genera con `docs/diagrams/arquitectura.py` y `render.mjs`, y está embebido en el README, en el de Terraform y en `architecture.md`. Reemplaza al de `tp3/`, que seguía mostrando SES como canal real |
+| README de Terraform | La guía paso a paso que pide la consigna, en siete pasos y en castellano (antes era solo un link a `deployment.md`); el destroy en la tabla de requisitos; el aviso de `hash_key` deprecado que sale del módulo externo |
+| `depends_on` sobrante | El de `aws_apigatewayv2_deployment.ws` y su comentario, que decía que la referencia en `triggers` no ordena la creación (sí la ordena) |
+| ARNs | `arn:aws` escrito a mano en `data.tf` y `openapi.tf` pasa a `data.aws_partition` |
+| Región | El workflow la pasa como `TF_VAR_region` desde `AWS_REGION`, como ya hacía con el stage |
+| Credenciales | El plan corta con un mensaje claro si falta alguno de los tres secrets |
+| Nombres | Todo en inglés: `cargar_demo` → `demo_enabled`, `email_alertas` → `alert_email` (y `TF_VAR_alert_email`), el bucket `artefactos` → `artifacts`, las alarmas `-stream-failures`, `-dlq-not-empty` y `-oldest-message` |
+| `buckets.sh create` | Conserva los nombres anotados antes que ya no están en el plan, delante de los nuevos: con el renombre, el bucket `q-artefactos-…` de un despliegue existente sigue anotado y el destroy lo borra. Probado con un `aws` simulado |
+| Regex de email | Repetida cinco veces en `variables.tf`; ahora es `local.email_pattern`, con un test que comprueba que la validación sigue rechazando un mail inválido |
+
+**Efecto en un despliegue existente.** El próximo apply crea `q-artifacts-…`, mueve ahí los zips de
+las funciones (las funciones se actualizan, no se recrean) y recrea las cinco alarmas con sus nombres
+nuevos. `q-artefactos-…` queda vacío hasta el próximo destroy.
+
+Verificado localmente: `fmt`, `validate`, tflint y actionlint sin hallazgos; `terraform test` 5/5 en
+la raíz y 4/3/5 en los módulos.
