@@ -2,7 +2,7 @@
 > CloudFormation, su diagrama y este runbook. Ya no describen el despliegue vigente, que es el de
 > [`infra/terraform/`](../infra/terraform/), y el backend Java que compilan (`backend/`) ya no está en
 > el repositorio: sigue en el historial de git. Las correcciones del TP2 están en
-> [`ROADMAP.md`](../ROADMAP.md).
+> [`ROADMAP.md`](../docs/historial/ROADMAP.md).
 
 # Deploying Q on AWS
 

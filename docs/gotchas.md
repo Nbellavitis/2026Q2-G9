@@ -164,7 +164,7 @@ Each of these is a deliberate decision that a well-meaning cleanup would break.
 
 | Question | Document |
 |---|---|
-| Why is it built this way? | [architecture.md](architecture.md), with the decision log; the original design in [arquitectura-serverless.md](../arquitectura-serverless.md) |
+| Why is it built this way? | [architecture.md](architecture.md), with the decision log; the original design in [arquitectura-serverless.md](historial/arquitectura-serverless.md) |
 | What are the domain rules? | [domain-model.md](domain-model.md) |
 | What does the API do? | [api-reference.md](api-reference.md) |
 | How does the frontend work? | [frontend.md](frontend.md) |

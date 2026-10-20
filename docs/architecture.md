@@ -1,8 +1,8 @@
 # Q — Architecture, Design and Decisions
 
 How the system is built, as deployed for the Tercera Entrega, and why. The design it was built from
-is [arquitectura-serverless.md](../arquitectura-serverless.md) (in Spanish); where the build deviates
-from it, the "Ajustes al diseño" table in [ROADMAP.md](../ROADMAP.md#ajustes-al-diseño) says so and
+is [arquitectura-serverless.md](historial/arquitectura-serverless.md) (in Spanish); where the build deviates
+from it, the "Ajustes al diseño" table in [ROADMAP.md](historial/ROADMAP.md#ajustes-al-diseño) says so and
 why. The previous architecture — Spring Boot on EC2 behind a load balancer, with PostgreSQL on RDS —
 is in [`tp2/`](../tp2/) and in this file's git history.
 

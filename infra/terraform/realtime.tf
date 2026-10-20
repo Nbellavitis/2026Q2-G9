@@ -1,5 +1,5 @@
-# La API WebSocket del tiempo real (arquitectura-serverless.md §3.2). AWS sostiene las conexiones;
-# las funciones solo se invocan al abrir y al cerrar cada una:
+# La API WebSocket del tiempo real (docs/historial/arquitectura-serverless.md §3.2). AWS sostiene
+# las conexiones; las funciones solo se invocan al abrir y al cerrar cada una:
 #
 #   $connect      λ ws-connections: valida el ticket del cliente o el de un solo uso del staff
 #   $disconnect   λ ws-connections: borra la conexión

@@ -5,8 +5,8 @@ desplegado a mano) y terminando en la arquitectura de
 [arquitectura-serverless.md](arquitectura-serverless.md), desplegada con Terraform desde un pipeline
 de GitHub Actions.
 
-**Lectura vigente:** [README Terraform](infra/terraform/README.md), [guía de despliegue](docs/deployment.md)
-y [arquitectura implementada](docs/architecture.md). Las fases anteriores conservan el plan original;
+**Lectura vigente:** [README Terraform](../../infra/terraform/README.md), [guía de despliegue](../deployment.md)
+y [arquitectura implementada](../architecture.md). Las fases anteriores conservan el plan original;
 la lista de entrega y la matriz de requisitos de abajo describen el estado revisado el 2026-10-20.
 
 ---
@@ -349,12 +349,12 @@ AWS.**
 
 ## Fase 7 · Entrega
 
-- [x] [README de Terraform](infra/terraform/README.md): módulos, variables, outputs, funciones,
+- [x] [README de Terraform](../../infra/terraform/README.md): módulos, variables, outputs, funciones,
       meta-argumentos, locals, datasources, límites del estado y correcciones del TP2.
 - [x] README por módulo propio con entradas, salidas y ejemplos referidos al código vigente.
-- [x] [Guía de despliegue](docs/deployment.md): configuración inicial, eventos/jobs, artefactos,
+- [x] [Guía de despliegue](../deployment.md): configuración inicial, eventos/jobs, artefactos,
       resultados esperados, recuperación, comprobaciones manuales y destroy.
-- [x] [Diagrama Mermaid versionado](docs/architecture.md#2-system-overview) de la arquitectura
+- [x] [Diagrama Mermaid versionado](../architecture.md#2-system-overview) de la arquitectura
       implementada. Las exportaciones locales PNG/SVG no se consideran parte de la entrega hasta
       que se incorporen al repositorio.
 - [ ] **Ensayo independiente de la cátedra:** otra persona, en su propia cuenta, sigue sólo la guía:
@@ -378,7 +378,7 @@ AWS.**
 | Funciones | `jsonencode`, `jsondecode`, `file`, `fileset`, `lookup`, `filemd5`, `sha1`, `merge`, `format` y otras; ejemplos y motivos en el README Terraform |
 | Locals y datasources | Nombres, tags y mapas derivados; cuenta, región, rol existente, políticas, partición y empaquetado |
 
-La [matriz detallada](infra/terraform/README.md) enlaza cada uso con su archivo real. Esta tabla
+La [matriz detallada](../../infra/terraform/README.md) enlaza cada uso con su archivo real. Esta tabla
 describe implementación revisada; no certifica una ejecución actual del pipeline.
 
 ---

@@ -1,14 +1,14 @@
 # Q — session handoff
 
 Everything a new session or a teammate needs to continue without re-deriving it. Written
-2026-10-17, on branch `entrega-3`, at the end of Phase 6 of [ROADMAP.md](../ROADMAP.md).
+2026-10-17, on branch `entrega-3`, at the end of Phase 6 of [ROADMAP.md](ROADMAP.md).
 
 > **Historical snapshot from 2026-10-17.** Current operator instructions are in
-> [deployment.md](deployment.md), the [Terraform README](../infra/terraform/README.md), and the
-> current delivery checklist in [ROADMAP.md](../ROADMAP.md#fase-7--entrega). Counts and deployment
+> [deployment.md](../deployment.md), the [Terraform README](../../infra/terraform/README.md), and the
+> current delivery checklist in [ROADMAP.md](ROADMAP.md#fase-7--entrega). Counts and deployment
 > results below describe the session at that date, not the current PR state.
 >
-> Read [gotchas.md](gotchas.md) before deploying or deleting anything on AWS. This document is the
+> Read [gotchas.md](../gotchas.md) before deploying or deleting anything on AWS. This document is the
 > map; that one is the minefield.
 
 ---
@@ -31,10 +31,10 @@ is not meant to be merged before the correction.
 | Entrega | What it asks | State |
 |---|---|---|
 | **1 — Propuesta** | Pick and justify an idea | Done. Idea 1, "Queue" |
-| **2 — Diseño y Demo de Arquitectura Fundacional** | A design document and a live demo in the lab | Done. Spring Boot on EC2 behind a load balancer, RDS, CloudFormation. Kept in [`tp2/`](../tp2/) and in git history |
+| **2 — Diseño y Demo de Arquitectura Fundacional** | A design document and a live demo in the lab | Done. Spring Boot on EC2 behind a load balancer, RDS, CloudFormation. Kept in [`tp2/`](../../tp2/) and in git history |
 | **3 — Terraform** | Implement the architecture with Terraform, deployed from a GitHub Actions pipeline that runs on the pull request, with the TP2's corrections | In progress: Phases 1–5 deployed, Phase 6 done in the repository, Phase 7 pending |
 
-The rubric and how each point is met are in [ROADMAP.md](../ROADMAP.md#cómo-se-evalúa). 40 % is that
+The rubric and how each point is met are in [ROADMAP.md](ROADMAP.md#cómo-se-evalúa). 40 % is that
 it deploys and works, 30 % is modules. **The cátedra has to be able to run it in their own lab
 account** with nothing but the README: no hard-coded account values, no manual steps, everything
 destroyable.
@@ -59,7 +59,7 @@ throughout, and queue lanes by party size.
 | 6 · Retire the old system | Done in the repository: Java backend, compose file and SSE removed, TP2 files moved, docs rewritten. The lab-side cleanup is pending (§9) |
 | 7 · Delivery | Pending: `infra/terraform/README.md`, a README per module, the updated diagram, a dry run by someone who did not write the Terraform, the PR to the cátedra's repository |
 
-[AVANCE-ENTREGA-3.md](../AVANCE-ENTREGA-3.md) is the detailed log, phase by phase: what was built,
+[AVANCE-ENTREGA-3.md](AVANCE-ENTREGA-3.md) is the detailed log, phase by phase: what was built,
 what was decided and why, what was verified.
 
 **The first complete deployment** (Actions run 39081506431) created 200 resources and passed the whole
@@ -102,7 +102,7 @@ arquitectura-serverless.md  the serverless design (Spanish)
 
 ## 5. How to run everything
 
-**Deploy** — see [deployment.md](deployment.md). In short: lab credentials into the three secrets,
+**Deploy** — see [deployment.md](../deployment.md). In short: lab credentials into the three secrets,
 push to `entrega-3`, approve the apply, read the URLs in the run summary.
 
 **Tests:**
@@ -135,7 +135,7 @@ Each module has its own tests too: `terraform init -backend=false && terraform t
 
 ## 6. The architecture, in brief
 
-[architecture.md](architecture.md) is the full version. The four ideas that hold it together:
+[architecture.md](../architecture.md) is the full version. The four ideas that hold it together:
 
 * **Every change to a queue is one DynamoDB transaction conditioned on the queue's version.** No
   locks; the loser re-reads and decides again.
@@ -144,7 +144,7 @@ Each module has its own tests too: `terraform init -backend=false && terraform t
   a closed queue — is a consumer of those events.
 * **Consumers re-read state instead of trusting events.** Duplicates and reordering cost at most an
   extra evaluation. The claims reduce duplicate emails but do not make SMTP and DynamoDB atomic;
-  see the current limits in [architecture.md](architecture.md#6-concurrency-and-correctness).
+  see the current limits in [architecture.md](../architecture.md#6-concurrency-and-correctness).
 * **The lab's limits shaped the deployment.** No IAM roles (everything uses `LabRole`), no
   CloudFront (API Gateway serves the site), an SCP that keeps Terraform from creating S3 buckets
   (the pipeline creates them), and no SES (emails go through Gmail's SMTP server, the one secret).
@@ -181,7 +181,7 @@ git -c url."ssh://git@ssh.github.com:443/".insteadOf="git@github.com:" push orig
 ```
 
 **Don't push while the lab is up and nobody can approve.** Every push to the PR queues an apply; an
-unapproved one blocks the next destroy ([gotchas.md](gotchas.md) §2).
+unapproved one blocks the next destroy ([gotchas.md](../gotchas.md) §2).
 
 **Language.** Code comments, commit messages, ROADMAP and AVANCE are in Spanish; the documents in
 `docs/` and the README are in English.
@@ -214,7 +214,7 @@ password if the database is kept.
    too, since the 404 page is embedded in the API definition. The WebSocket deployment is replaced
    on every plan as well; why is still to be found.
 3. **`reasons[0]` in `commit`** only recognises a version conflict at position 0. Correct today, and
-   widening it would break the order-key protection ([gotchas.md](gotchas.md) §6).
+   widening it would break the order-key protection ([gotchas.md](../gotchas.md) §6).
 4. **No frontend test suite.** Playwright against a deployed stack is the obvious next step.
 5. **Nothing reads the lane history that retiring preserves.** A retired lane keeps which band each
    finished customer was served in; no metric uses it yet.
@@ -223,7 +223,7 @@ password if the database is kept.
 
 ## 10. If you are picking this up cold
 
-Read, in order: this file → [gotchas.md](gotchas.md) → [architecture.md](architecture.md) §§1–3 for
+Read, in order: this file → [gotchas.md](../gotchas.md) → [architecture.md](../architecture.md) §§1–3 for
 the shape, then whichever section covers what you are touching. `git log` messages and AVANCE carry
 the reasoning for anything recent.
 

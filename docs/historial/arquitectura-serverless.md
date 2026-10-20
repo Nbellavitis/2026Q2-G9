@@ -4,10 +4,10 @@
 > DynamoDB, y adaptada a las restricciones del **AWS Academy Learner Lab** (sin dominio propio,
 > sin CloudFront, sin creación de roles IAM y con concurrencia de Lambda limitada).
 >
-> Complementa a [propuesta-arquitectura-v2.md](propuesta-arquitectura-v2.md), que compara esta
-> opción con las alternativas, y a [architecture.md](architecture.md), que documenta el sistema
+> Complementa a [propuesta-arquitectura-v2.md](../../propuesta-arquitectura-v2.md), que compara esta
+> opción con las alternativas, y a [architecture.md](../architecture.md), que documenta el sistema
 > actual. Las reglas de negocio (estados, políticas de no-show, carriles, estimación) no cambian:
-> están en [domain-model.md](domain-model.md).
+> están en [domain-model.md](../domain-model.md).
 
 ---
 
@@ -30,7 +30,7 @@
 
 ## 1. Vista general
 
-![Arquitectura serverless de Q en AWS Academy](img/arquitectura-serverless-academy.svg)
+![Arquitectura serverless de Q en AWS Academy](../../img/arquitectura-serverless-academy.svg)
 
 El mismo diagrama en Mermaid, con las rutas y las etiquetas de cada conexión:
 
@@ -213,7 +213,7 @@ solo) y **un mensaje no puede pasar de 128 KB** (el tablero de una cola grande d
 | `λ lifecycle` | `q-lifecycle` | Aplica las mutaciones que dispara el sistema y no una persona: vencimiento de gracia y liberación masiva al cerrar una cola |
 | Firehose | stream-publisher | Agrupa los eventos, los convierte a Parquet y los escribe en `s3://q-lake/events/dt=YYYY-MM-DD/` |
 
-> En [propuesta-arquitectura-v2.md](propuesta-arquitectura-v2.md) esta función se llamaba `λ grace`.
+> En [propuesta-arquitectura-v2.md](../../propuesta-arquitectura-v2.md) esta función se llamaba `λ grace`.
 > Se renombra porque también maneja el cierre de colas: las dos son mutaciones disparadas por el
 > sistema con la misma lógica de dominio.
 

@@ -1,5 +1,5 @@
-// Las claves de la tabla única `q-main` (arquitectura-serverless.md §5). Todo lo que arma un PK o un
-// SK pasa por acá, así el modelo de datos se lee en un solo archivo.
+// Las claves de la tabla única `q-main` (docs/historial/arquitectura-serverless.md §5). Todo lo que
+// arma un PK o un SK pasa por acá, así el modelo de datos se lee en un solo archivo.
 
 import type { Entry, EntryStatus } from '../domain/types.js'
 

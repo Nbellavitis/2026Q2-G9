@@ -61,7 +61,7 @@ export const entryRefItem = (entry: Entry): Item => ({
 /**
  * El evento de dominio como ítem. Es lo único que `λ stream-publisher` publica del stream: escribirlo
  * dentro de la misma transacción que el cambio es lo que garantiza que no hay cambio sin evento ni
- * evento sin cambio (arquitectura-serverless.md §6.2).
+ * evento sin cambio (docs/historial/arquitectura-serverless.md §6.2).
  */
 export const eventItem = (event: DomainEvent, version: number, index: number, now: Date): Item => ({
   PK: keys.eventsPk(event.queueId),

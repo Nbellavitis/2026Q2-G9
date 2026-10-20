@@ -32,8 +32,8 @@ module "workers" {
 }
 
 # Cada consumidor lee su cola. Con la concurrencia de Lambda limitada en el lab, cada uno tiene un
-# techo propio (arquitectura-serverless.md §9): un pico de avisos no puede dejar sin ejecuciones a la
-# API ni al push en vivo.
+# techo propio (docs/historial/arquitectura-serverless.md §9): un pico de avisos no puede dejar sin
+# ejecuciones a la API ni al push en vivo.
 resource "aws_lambda_event_source_mapping" "consumers" {
   for_each = local.consumers
 

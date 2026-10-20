@@ -1,5 +1,5 @@
 // λ lifecycle: consume q-lifecycle y aplica lo que dispara el sistema y no una persona
-// (arquitectura-serverless.md §7.7 y §7.9):
+// (docs/historial/arquitectura-serverless.md §7.7 y §7.9):
 //
 //   GRACE     un llamado cuyo plazo venció: se aplica la política de ausencia de la cola
 //   RELEASE   una cola cerrada: se libera a quienes quedaban, en lotes que entran en una transacción

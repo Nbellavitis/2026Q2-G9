@@ -1,5 +1,5 @@
-// λ notifier: consume q-notifications y manda los avisos que corresponden (arquitectura-serverless.md
-// §6.5 y §7.6).
+// λ notifier: consume q-notifications y manda los avisos que corresponden
+// (docs/historial/arquitectura-serverless.md §6.5 y §7.6).
 //
 // Qué avisar se decide con el estado actual de la cola, no con el evento: cualquier movimiento puede
 // hacer que alguien cruce un umbral ("faltan 3 personas"). Por eso no importan el orden ni los

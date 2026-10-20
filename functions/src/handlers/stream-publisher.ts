@@ -1,5 +1,5 @@
 // λ stream-publisher: lee el stream de q-main y publica cada evento de dominio en el bus
-// (arquitectura-serverless.md §3.4 y §6.2).
+// (docs/historial/arquitectura-serverless.md §3.4 y §6.2).
 //
 // Los eventos son ítems escritos en la misma transacción que el cambio que describen: existen si y
 // solo si el cambio se confirmó. Esta función solo los reparte:

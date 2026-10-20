@@ -1,7 +1,7 @@
 # Deploying Queue
 
 This is the operator's guide for the Tercera Entrega. Follow it from a branch of the submission
-repository. The [Terraform README](../infra/terraform/README.md) explains modules, variables,
+repository. The [main README](../README.md#4-terraform) explains modules, variables,
 outputs, functions, meta-arguments and TP2 corrections. The [architecture](architecture.md)
 describes the deployed system and its delivery limits. The source of pipeline behavior is
 [terraform.yml](../.github/workflows/terraform.yml).
@@ -199,7 +199,7 @@ output into the submission, a screenshot or an issue.
 
 Defaults are demo enabled, simulated emails unless configured, no alarm email subscriber, stage
 `prod`, region `us-east-1`, log retention 14 days and staff sessions 12 hours. Every variable/default
-is listed in the [Terraform README](../infra/terraform/README.md#entradas-y-salidas).
+is listed in the [main README](../README.md#46-variables-y-outputs).
 
 Local `terraform.tfvars` is ignored and is not loaded by the hosted runner. The workflow passes
 the optional email variables and `TF_VAR_api_stage_name` from `API_STAGE` in both plan and destroy.
@@ -263,7 +263,7 @@ apply bootstraps a new state bucket. Keep the lab active until cleanup finishes.
 
 ## 7. Evidence for submission and independent reproduction
 
-The chronological [progress log](../AVANCE-ENTREGA-3.md) records earlier deployments, including
+The chronological [progress log](historial/AVANCE-ENTREGA-3.md) records earlier deployments, including
 [run 39180411198](https://github.com/josebl123/tp-cloud/actions/runs/39180411198) with a successful
 WebSocket smoke test and manually observed SMTP receipt. That is historical evidence, not proof
 that the current PR head or another account passes today.
