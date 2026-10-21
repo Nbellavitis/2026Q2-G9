@@ -53,8 +53,14 @@ read_record() {
   local state_bucket=$1 out
   if out=$(aws s3api head-object --bucket "$state_bucket" --key "$RECORD_KEY" \
     --expected-bucket-owner "$ACCOUNT" 2>&1); then
-    aws s3 cp "s3://${state_bucket}/${RECORD_KEY}" - --expected-bucket-owner "$ACCOUNT" ||
+    # Con s3api y no `aws s3 cp`: el comando de alto nivel no acepta --expected-bucket-owner.
+    local file
+    file=$(mktemp)
+    aws s3api get-object --bucket "$state_bucket" --key "$RECORD_KEY" \
+      --expected-bucket-owner "$ACCOUNT" "$file" >/dev/null ||
       fail "No se pudo leer s3://${state_bucket}/${RECORD_KEY}"
+    cat "$file"
+    rm -f "$file"
   elif grep -qE '\(404\)|Not Found|NoSuchKey' <<<"$out"; then
     return 0
   else
@@ -80,8 +86,12 @@ create() {
     kept+=("$name")
   done <<<"$previous"
 
-  printf '%s\n' "${kept[@]}" "$@" | sed '/^$/d' |
-    aws s3 cp - "s3://${state_bucket}/${RECORD_KEY}" --no-progress --expected-bucket-owner "$ACCOUNT" >/dev/null
+  local file
+  file=$(mktemp)
+  printf '%s\n' "${kept[@]}" "$@" | sed '/^$/d' >"$file"
+  aws s3api put-object --bucket "$state_bucket" --key "$RECORD_KEY" --body "$file" \
+    --expected-bucket-owner "$ACCOUNT" >/dev/null
+  rm -f "$file"
   echo "Anotados en s3://${state_bucket}/${RECORD_KEY}"
 
   for name in "$@"; do
@@ -165,7 +175,8 @@ delete() {
   done
 
   # Recién con todos borrados se quita la lista: si algo falló antes, sigue ahí para reintentar.
-  aws s3 rm "s3://${state_bucket}/${RECORD_KEY}" --only-show-errors --expected-bucket-owner "$ACCOUNT"
+  aws s3api delete-object --bucket "$state_bucket" --key "$RECORD_KEY" \
+    --expected-bucket-owner "$ACCOUNT" >/dev/null
 }
 
 # Vacía y borra el bucket del estado, todas sus versiones incluidas. Solo después de un destroy
