@@ -263,6 +263,29 @@ El estado vive en S3, en `tfstate-q-<cuenta>-<región>`, con la clave `queue/ter
 | El bucket del estado | La acción `terraform-init` | Tiene que existir antes del `init` |
 | El valor de la contraseña SMTP | El job Apply, con la AWS CLI, después del apply | Por Terraform quedaría en texto plano en el plan guardado y en el estado |
 
+**Por qué los buckets se crean con la CLI.** De las tres excepciones, es la única que no es una
+decisión de diseño sino una restricción del Learner Lab. Al crear un bucket con `aws_s3_bucket`,
+el provider de AWS lee enseguida su configuración de object lock, y en el lab esa lectura está
+bloqueada por una política de la organización (SCP):
+
+```
+Error: reading S3 Bucket (q-logs-<cuenta>-us-east-1) object lock configuration:
+AccessDenied: ... not authorized to perform: s3:GetBucketObjectLockConfiguration ...
+with an explicit deny in a service control policy
+```
+
+El provider hace esa lectura siempre, en todas las versiones que probamos (4.67, 5.100 y 6.67), y no
+hay ningún argumento que la evite. Por eso:
+
+1. El pipeline crea los tres buckets con `aws s3api create-bucket`, usando **los nombres que calcula
+   Terraform** (el output `bucket_names` del plan guardado): el nombre no se escribe dos veces.
+2. Terraform administra **todo lo demás** de cada bucket con el módulo `private-bucket`: bloqueo del
+   acceso público, propiedad de los objetos, versionado, política con TLS obligatorio, registros de
+   acceso, ciclo de vida y los objetos que contiene.
+3. Al destruir, Terraform borra todo lo suyo y después el pipeline vacía y borra los buckets.
+
+En una cuenta sin esa restricción alcanzaría con volver a declarar `aws_s3_bucket` dentro del módulo.
+
 ---
 
 ## 5. Pipeline de GitHub Actions
