@@ -4,9 +4,12 @@
 #                              │                                         └─▶ SQS q-notifications (filtrada)
 #                              └──────────────────────────────────────────▶ SQS q-lifecycle (con demora)
 #
-# Cada evento es un ítem escrito en la misma transacción que el cambio que describe (§6.2): existe si
-# y solo si el cambio se confirmó. Lo que pasa después es asíncrono, reintentable e idempotente.
+# Cada evento es un ítem escrito en la misma transacción que el cambio que describe: existe si y
+# solo si el cambio se confirmó. Lo que pasa después es asíncrono, reintentable e idempotente.
 
+# Sin cifrado propio, a propósito: un evento pasa por el tópico solo hasta entregarse a las colas SQS,
+# que sí lo cifran en reposo. Cifrar el tópico sumaría KMS a la publicación de cada evento.
+#tfsec:ignore:aws-sns-enable-topic-encryption
 resource "aws_sns_topic" "queue_events" {
   name       = format("%s-queue-events.fifo", var.project)
   fifo_topic = true

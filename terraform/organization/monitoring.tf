@@ -1,6 +1,10 @@
 # Las alarmas de todo el sistema avisan acá. Con `alert_email`, además llegan por email (hay que
 # confirmar la suscripción desde el link que manda AWS).
 
+# Sin cifrado, a propósito: las alarmas de CloudWatch no pueden publicar en un tópico cifrado con la
+# clave que administra AWS; haría falta una clave KMS propia con su política. Solo lleva avisos de
+# alarmas, sin datos de los clientes.
+#tfsec:ignore:aws-sns-enable-topic-encryption
 resource "aws_sns_topic" "alerts" {
   name = format("%s-alerts", var.project)
 }
