@@ -502,7 +502,9 @@ lo que la consigna permite. El código de SES sigue disponible para una cuenta d
 ## 10. Seguridad: hallazgos de tfsec
 
 El repositorio de la entrega corre [tfsec](https://github.com/aquasecurity/tfsec) en cada pull
-request. Lo que marca sobre esta configuración, y qué se decidió con cada cosa:
+request. Lo que marca sobre esta configuración, y qué se decidió con cada cosa. Los hallazgos de
+severidad alta que se dejan a propósito están marcados en el código con un comentario
+`#tfsec:ignore:<regla>` y su motivo, al lado del recurso:
 
 | Hallazgo | Decisión |
 |---|---|
