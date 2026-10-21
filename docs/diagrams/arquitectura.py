@@ -23,8 +23,11 @@ OPS = "#3b4a54"     # despliegue y operación
 ALERT = "#b0202f"
 FONT = "DejaVu Sans, Verdana, Geneva, sans-serif"
 
-W, H = 1990, 1330
-ICON = 52
+W, H = 1720, 1500
+ICON = 64
+TITLE = 20     # nombre de cada servicio
+SUB = 15       # su detalle
+CHIP = 14      # etiquetas de las flechas
 
 
 def esc(t):
@@ -52,44 +55,52 @@ class Svg:
         """Un grupo de AWS: borde, ícono en la esquina y el nombre al lado."""
         self.box(x, y, w, h, color, fill, dash)
         if icon:
-            self.add(f'<rect x="{x}" y="{y}" width="30" height="30" fill="{color}"/>')
-            self.add(icon(x, y))
-        self.text(x + (38 if icon else 10), y + 20, label, 13, color, weight="bold")
+            self.add(f'<rect x="{x}" y="{y}" width="36" height="36" fill="{color}"/>')
+            self.add(f'<g transform="translate({-0.2 * x:.1f} {-0.2 * y:.1f}) scale(1.2)">{icon(x, y)}</g>')
+        self.text(x + (46 if icon else 12), y + 25, label, 18, color, weight="bold")
 
     def node(self, key, cx, cy, title, *lines, color=INK):
-        """Un servicio: el ícono centrado en (cx, cy) y su nombre debajo."""
+        """Un servicio: el ícono centrado en (cx, cy), su nombre debajo (una o dos líneas) y el detalle."""
         self.add(f'<image href="{self.icons[key]}" x="{cx - ICON / 2}" y="{cy - ICON / 2}" '
                  f'width="{ICON}" height="{ICON}"/>')
-        self.text(cx, cy + ICON / 2 + 17, title, 12.5, color, anchor="middle", weight="bold")
-        for i, line in enumerate(lines):
-            self.text(cx, cy + ICON / 2 + 33 + 14 * i, line, 10.5, MUTED, anchor="middle")
+        y = cy + ICON / 2 + 23
+        for part in title.split("\n"):
+            self.text(cx, y, part, TITLE, color, anchor="middle", weight="bold")
+            y += TITLE + 4
+        for line in lines:
+            self.text(cx, y, line, SUB, MUTED, anchor="middle")
+            y += SUB + 4
 
     def mail(self, cx, cy, title, *lines):
         """Un buzón de email externo (no es un servicio de AWS, así que no lleva ícono de AWS)."""
-        x, y = cx - 26, cy - 18
-        self.add(f'<rect x="{x}" y="{y}" width="52" height="36" rx="4" fill="#ffffff" stroke="{INK}" '
-                 f'stroke-width="2"/><path d="M{x} {y} L{cx} {cy + 4} L{x + 52} {y}" fill="none" '
-                 f'stroke="{INK}" stroke-width="2"/>')
-        self.text(cx, cy + 40, title, 12.5, INK, anchor="middle", weight="bold")
-        for i, line in enumerate(lines):
-            self.text(cx, cy + 56 + 14 * i, line, 10.5, MUTED, anchor="middle")
+        x, y = cx - 32, cy - 22
+        self.add(f'<rect x="{x}" y="{y}" width="64" height="44" rx="5" fill="#ffffff" stroke="{INK}" '
+                 f'stroke-width="2.5"/><path d="M{x} {y} L{cx} {cy + 6} L{x + 64} {y}" fill="none" '
+                 f'stroke="{INK}" stroke-width="2.5"/>')
+        y = cy + 22 + 25
+        for part in title.split("\n"):
+            self.text(cx, y, part, TITLE, INK, anchor="middle", weight="bold")
+            y += TITLE + 4
+        for line in lines:
+            self.text(cx, y, line, SUB, MUTED, anchor="middle")
+            y += SUB + 4
 
-    def line(self, points, color, dash=None, arrow=True, width=1.8):
+    def line(self, points, color, dash=None, arrow=True, width=2.4):
         d = "M" + " L".join(f"{x} {y}" for x, y in points)
         da = f' stroke-dasharray="{dash}"' if dash else ""
         m = f' marker-end="url(#m{color[1:]})"' if arrow else ""
         self.add(f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{width}"{da}{m}/>')
 
-    def chip(self, x, y, t, color, size=10.5):
-        w = len(t) * size * 0.58 + 12
-        self.add(f'<rect x="{x - w / 2:.0f}" y="{y - size - 2}" width="{w:.0f}" height="{size + 7}" '
-                 f'rx="4" fill="#ffffff" stroke="{color}" stroke-width="1"/>')
+    def chip(self, x, y, t, color, size=CHIP):
+        w = len(t) * size * 0.6 + 14
+        self.add(f'<rect x="{x - w / 2:.0f}" y="{y - size - 3}" width="{w:.0f}" height="{size + 9}" '
+                 f'rx="5" fill="#ffffff" stroke="{color}" stroke-width="1.3"/>')
         self.text(x, y, t, size, color, anchor="middle", weight="bold")
 
     def render(self):
         markers = "".join(
-            f'<marker id="m{c[1:]}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" '
-            f'markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="{c}"/></marker>'
+            f'<marker id="m{c[1:]}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" '
+            f'markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="{c}"/></marker>'
             for c in (REQ, SYNC, BUS, OPS, ALERT, INK)
         )
         head = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" '
@@ -112,160 +123,136 @@ def build(icons):
     s = Svg(icons)
     h = ICON / 2
 
-    s.text(30, 40, "Queue · arquitectura en AWS (TP3)", 22, weight="bold")
-    s.text(30, 63, "Serverless · desplegada con Terraform desde GitHub Actions · AWS Academy Learner Lab · Grupo 9",
-           13, MUTED)
+    # columnas y filas de la grilla
+    c1, c2, c3, c4, c5, c6 = 340, 560, 780, 1000, 1210, 1420
+    rA, rB, rC, rE, rF, rG = 255, 470, 680, 885, 1135, 1300
+    ext_l, ext_r = 110, 1640
+
+    s.text(30, 46, "Queue · arquitectura en AWS (TP3)", 30, weight="bold")
+    s.text(30, 76, "Serverless · desplegada con Terraform desde GitHub Actions · AWS Academy Learner Lab · Grupo 9",
+           16, MUTED)
+
+    # ------------------------------------------------------------ leyenda, en una fila
+    legend = [(REQ, "pedido del usuario"), (SYNC, "datos"), (BUS, "evento o mensaje"), (ALERT, "alarma"),
+              (OPS, "pipeline e infraestructura")]
+    lx = 30
+    for color, label in legend:
+        s.line([(lx, 108), (lx + 40, 108)], color)
+        s.text(lx + 50, 113, label, 15, INK)
+        lx += 50 + len(label) * 8.6 + 40
 
     # ------------------------------------------------------------ bordes
-    s.group(250, 90, 1470, 1125, CLOUD, "AWS Cloud", icon=cloud_icon)
-    s.group(275, 135, 1420, 1060, REGION, "Región us-east-1 (N. Virginia)  ·  sin VPC", icon=region_icon,
-            dash="8 5")
+    s.group(220, 135, 1330, 1290, CLOUD, "AWS Cloud", icon=cloud_icon)
+    s.group(245, 185, 1280, 1215, REGION, "Región us-east-1  ·  sin VPC", icon=region_icon, dash="9 6")
 
     # ------------------------------------------------------------ afuera de AWS
-    s.node("user", 130, 470, "Navegador", "cliente y staff")
-    s.node("gha", 130, 960, "GitHub Actions", "validate · plan · apply", "destroy · smoke test", color=OPS)
-    s.node("tf", 130, 1120, "Terraform", "estado en S3 tfstate", color=OPS)
-    s.mail(1850, 820, "Gmail SMTP", "smtp.gmail.com:465", "avisos a clientes")
-    s.mail(1850, 1100, "Email del equipo", "alarmas")
+    s.node("user", ext_l, rB, "Navegador", "cliente y staff")
+    s.node("gha", ext_l, rF, "GitHub\nActions", "el pipeline", color=OPS)
+    s.node("tf", ext_l, rG, "Terraform", color=OPS)
+    s.mail(ext_r, rE, "Gmail\nSMTP", "mails a clientes")
+    s.mail(ext_r, rG, "Mail del\nequipo", "alarmas")
 
-    # ------------------------------------------------------------ entrada
-    s.node("cognito", 400, 230, "Cognito", "user pool + cliente web")
-    s.node("lambda", 620, 230, "λ cognito-pre-signup", "confirma el alta")
-    s.node("lambda", 860, 230, "λ seed", "datos de demo (al aplicar)")
-    s.node("apigw", 400, 450, "API Gateway REST", "stage prod · throttling")
-    s.node("s3", 400, 640, "S3 spa", "sitio estático (privado)")
-    s.node("apigw", 400, 800, "API Gateway WebSocket", "$connect · $disconnect · ping")
+    # ------------------------------------------------------------ entrada, API y datos
+    s.node("cognito", c1, rA, "Cognito", "cuentas del staff")
+    s.node("lambda", c2, rA, "λ cognito-pre-signup", "confirma el alta")
+    s.node("lambda", c3, rA, "λ seed", "datos de demo")
+    s.node("apigw", c1, rB, "API Gateway\nREST", "sitio + /api/v1")
+    s.node("lambda", c2, rB, "λ staff", "panel y llamados")
+    s.node("ddb", c3, rB, "DynamoDB\nq-main", "tabla única")
+    s.node("s3", c1, rC, "S3 spa", "sitio (privado)")
+    s.node("lambda", c2, rC, "λ public", "anotarse y ticket")
+    s.node("apigw", c1, rE, "API Gateway\nWebSocket", "tiempo real")
+    s.node("lambda", c2, rE, "λ ws-connections", "abre y cierra")
+    s.node("ddb", c3, rE, "DynamoDB\nq-connections", "sockets abiertos")
 
-    # ------------------------------------------------------------ cómputo y datos
-    s.node("lambda", 620, 380, "λ staff", "panel · llamados · métricas")
-    s.node("lambda", 620, 520, "λ public", "anotarse · ticket · QR")
-    s.node("lambda", 620, 800, "λ ws-connections", "valida el ticket en q-main")
-    s.node("ddb", 860, 450, "DynamoDB q-main", "colas · entradas · eventos", "miembros · avisos · PITR")
-    s.node("ddb", 860, 800, "DynamoDB q-connections", "sockets abiertos · GSI byQueue", "TTL · sin Streams")
-
-    # ------------------------------------------------------------ eventos
-    s.node("ddbstream", 1040, 450, "DynamoDB Streams", "NEW_AND_OLD_IMAGES")
-    s.node("lambda", 1225, 450, "λ stream-publisher", "filtro kind = EVENT")
-    s.node("sns", 1420, 450, "SNS FIFO", "q-queue-events")
-    s.node("sqs", 1040, 650, "SQS FIFO q-push", "orden por cola")
-    s.node("sqs", 1300, 650, "SQS q-lifecycle", "delay = gracia")
-    s.node("sqs", 1560, 650, "SQS q-notifications", "filtro por type")
-    s.node("lambda", 1040, 830, "λ broadcaster", "lee q-main y q-connections")
-    s.node("lambda", 1300, 830, "λ lifecycle", "vence gracias · libera")
-    s.node("lambda", 1560, 830, "λ notifier", "decide y marca en q-main")
-    s.node("secrets", 1560, 975, "Secrets Manager", "q-smtp (si hay SMTP)")
+    # ------------------------------------------------------------ bus de eventos
+    s.node("ddbstream", c4, rB, "DynamoDB\nStreams")
+    s.node("lambda", c5, rB, "λ stream-publisher")
+    s.node("sns", c6, rB, "SNS FIFO", "q-queue-events")
+    s.node("sqs", c4, rC, "SQS\nq-lifecycle", "demora = gracia")
+    s.node("sqs", c5, rC, "SQS FIFO\nq-push", "orden por cola")
+    s.node("sqs", c6, rC, "SQS\nq-notifications", "filtro por tipo")
+    s.node("lambda", c4, rE, "λ lifecycle", "escribe en q-main")
+    s.node("lambda", c5, rE, "λ broadcaster", "lee q-main")
+    s.node("lambda", c6, rE, "λ notifier", "escribe en q-main")
 
     # ------------------------------------------------------------ transversales
-    row = 1110
-    s.node("s3", 400, row, "S3 artifacts", "zips de las λ · versionado", color=OPS)
-    s.node("s3", 560, row, "S3 logs", "access logs de spa", "y artifacts", color=OPS)
-    s.node("s3", 720, row, "S3 tfstate", "estado + lockfile", color=OPS)
-    s.node("iam", 880, row, "IAM LabRole", "rol de las λ y de", "API Gateway → S3", color=OPS)
-    s.node("cw", 1040, row, "CloudWatch Logs", "logs de las 9 λ", color=OPS)
-    s.node("sqs", 1200, row, "SQS DLQs", "3 colas + stream-failures", color=ALERT)
-    s.node("cw", 1360, row, "CloudWatch Alarms", "DLQ · cola atrasada", "fallas del stream", color=ALERT)
-    s.node("sns", 1520, row, "SNS q-alerts", "email (si hay ALERT_EMAIL)", color=ALERT)
+    s.node("iam", c2, rF, "IAM LabRole", "rol de todo", color=OPS)
+    s.node("cw", c3, rF, "CloudWatch\nLogs", "logs de las λ", color=OPS)
+    s.node("secrets", c6, rF, "Secrets\nManager", "clave SMTP")
+    s.node("s3", c1, rG, "S3 artifacts", "código de las λ", color=OPS)
+    s.node("s3", c2, rG, "S3 logs", "access logs", color=OPS)
+    s.node("s3", c3, rG, "S3 tfstate", "estado", color=OPS)
+    s.node("sqs", c4, rG, "SQS DLQs", "mensajes fallidos", color=ALERT)
+    s.node("cw", c5, rG, "CloudWatch\nAlarms", color=ALERT)
+    s.node("sns", c6, rG, "SNS q-alerts", color=ALERT)
 
-    # ------------------------------------------------------------ pedidos del navegador
-    s.line([(130 + h, 455), (400 - h, 240)], REQ)
-    s.chip(232, 380, "staff: registro y login", REQ)
-    s.line([(130 + h, 470), (400 - h, 450)], REQ)
-    s.chip(250, 452, "HTTPS", REQ)
-    s.line([(130 + h, 485), (400 - h, 790)], REQ)
-    s.chip(250, 640, "wss", REQ)
-
-    s.line([(400, 450 - h), (400, 230 + h + 40)], REQ)
-    s.chip(400, 345, "authorizer: valida el JWT", REQ)
-    s.line([(400 + h, 230), (620 - h, 230)], REQ)
-    s.chip(510, 222, "trigger", REQ)
-    s.line([(400, 450 + h + 40), (400, 640 - h)], REQ)
-    s.chip(400, 590, "GET / (LabRole)", REQ)
-    s.line([(400 + h, 440), (620 - h, 385)], REQ)
-    s.chip(510, 398, "/api/v1/* (JWT)", REQ)
-    s.line([(400 + h, 460), (620 - h, 515)], REQ)
-    s.chip(527, 502, "/api/v1/public/*", REQ)
-    s.line([(400 + h, 800), (620 - h, 800)], REQ)
-    # staff da de alta miembros con la API de administración de Cognito
-    s.line([(600, 380 - h), (400 + h, 243)], REQ)
-    s.chip(540, 318, "alta de miembros", REQ)
+    # ------------------------------------------------------------ pedidos del usuario
+    s.line([(ext_l + h, rB - 14), (c1 - h, rA + 12)], REQ)
+    s.chip(220, 365, "login", REQ)
+    s.line([(ext_l + h, rB), (c1 - h, rB)], REQ)
+    s.chip(222, rB - 6, "HTTPS", REQ)
+    s.line([(ext_l + h, rB + 14), (c1 - h, rE - 12)], REQ)
+    s.chip(222, 690, "wss", REQ)
+    s.line([(c1, rB - h), (c1, rA + h + 46)], REQ)
+    s.chip(c1, 375, "valida el token", REQ)
+    s.line([(c1 + h, rA), (c2 - h, rA)], REQ)
+    s.chip(450, rA - 8, "trigger", REQ)
+    s.line([(c2 - h + 4, rB - h), (c1 + h, rA + 18)], REQ)
+    s.chip(497, 400, "alta de miembros", REQ)
+    s.line([(c1 + h, rB), (c2 - h, rB)], REQ)
+    s.line([(c1 + h, rB + 14), (c2 - h, rC - 10)], REQ)
+    s.line([(c1, rB + h + 84), (c1, rC - h)], REQ)
+    s.line([(c1 + h, rE), (c2 - h, rE)], REQ)
 
     # ------------------------------------------------------------ datos
-    s.line([(620 + h, 385), (860 - h, 440)], SYNC)
-    s.line([(620 + h, 515), (860 - h, 460)], SYNC)
-    s.line([(860, 230 + h + 40), (860, 450 - h)], SYNC)
-    s.line([(620 + h, 800), (860 - h, 800)], SYNC)
+    s.line([(c2 + h, rB), (c3 - h, rB)], SYNC)
+    s.line([(c2 + h, rC - 10), (c3 - h, rB + 14)], SYNC)
+    s.line([(c3, rA + h + 46), (c3, rB - h)], SYNC)
+    s.line([(c2 + h, rE), (c3 - h, rE)], SYNC)
 
     # ------------------------------------------------------------ eventos
-    s.line([(860 + h, 450), (1040 - h, 450)], BUS)
-    s.line([(1040 + h, 450), (1225 - h, 450)], BUS)
-    s.line([(1225 + h, 450), (1420 - h, 450)], BUS)
-    s.chip(1322, 442, "grupo = cola", BUS)
-    s.line([(1240, 450 + h + 40), (1300, 650 - h)], BUS)
-    s.chip(1253, 545, "CALLED · CLOSED", BUS)
-    s.line([(1420, 450 + h + 40), (1420, 600), (1040, 600), (1040, 650 - h)], BUS)
-    s.line([(1445, 450 + h + 40), (1560, 650 - h)], BUS)
-    s.line([(1040, 650 + h + 40), (1040, 830 - h)], BUS)
-    s.line([(1300, 650 + h + 40), (1300, 830 - h)], BUS)
-    s.line([(1560, 650 + h + 40), (1560, 830 - h)], BUS)
+    s.line([(c3 + h, rB), (c4 - h, rB)], BUS)
+    s.line([(c4 + h, rB), (c5 - h, rB)], BUS)
+    s.line([(c5 + h, rB), (c6 - h, rB)], BUS)
+    s.line([(c5 - 10, rB + h + 32), (c4 + h, rC - h)], BUS)
+    s.chip(1090, 595, "llamados y cierres", BUS)
+    s.line([(c6 - 10, rB + h + 70), (c5 + h, rC - h)], BUS)
+    s.line([(c6, rB + h + 70), (c6, rC - h)], BUS)
+    for c in (c4, c5, c6):
+        s.line([(c, rC + h + 70), (c, rE - h)], BUS)
 
-    # lifecycle se reprograma si la gracia supera los 15 minutos de delay de SQS
-    s.line([(1300 + h, 830), (1375, 830), (1375, 655), (1300 + h, 655)], BUS)
-    s.chip(1375, 745, "reprograma", BUS)
+    # lifecycle se reprograma si la gracia supera los 15 minutos de demora de SQS
+    s.line([(c4 - h, rE - 10), (c4 - 80, rE - 10), (c4 - 80, rC + 10), (c4 - h, rC + 10)], BUS)
+    s.chip(c4 - 80, 832, "reprograma", BUS)
 
-    # los consumidores escriben en q-main
-    s.line([(1300 - h, 815), (1190, 815), (1190, 580), (900, 580), (870, 450 + h + 52)], SYNC)
-    s.line([(1560 - h, 845), (1470, 845), (1470, 580), (1190, 580)], SYNC, arrow=False)
-    s.chip(1035, 572, "escriben en q-main", SYNC)
-
-    # broadcaster: lee las conexiones y empuja por la API de gestión del WebSocket
-    s.line([(1040 - h, 830), (860 + h, 805)], SYNC)
-    s.line([(1040, 830 + h + 40), (1040, 935), (300, 935), (300, 812), (400 - h, 812)], BUS)
-    s.chip(700, 927, "push por @connections", BUS)
+    # broadcaster: lee las conexiones y empuja por el WebSocket
+    s.line([(c5, rE + h + 70), (c5, 1010), (c3, 1010), (c3, rE + h + 74)], SYNC)
+    s.line([(c5 - 20, rE + h + 70), (c5 - 20, 1040), (275, 1040), (275, rE + 12), (c1 - h, rE + 12)], BUS)
+    s.chip(660, 1032, "push al navegador", BUS)
 
     # notifier
-    s.line([(1560, 830 + h + 40), (1560, 975 - h)], SYNC)
-    s.line([(1560 + h, 820), (1850 - 26, 820)], BUS)
-    s.chip(1758, 812, "SMTP sobre TLS", BUS)
+    s.line([(c6, rE + h + 70), (c6, rF - h)], SYNC)
+    s.line([(c6 + h, rE), (ext_r - 32, rE)], BUS)
 
     # alarmas
-    s.line([(1200 + h, row), (1360 - h, row)], ALERT)
-    s.line([(1360 + h, row), (1520 - h, row)], ALERT)
-    s.line([(1520 + h, row), (1850 - 26, row)], ALERT)
+    s.line([(c4 + h, rG), (c5 - h, rG)], ALERT)
+    s.line([(c5 + h, rG), (c6 - h, rG)], ALERT)
+    s.line([(c6 + h, rG), (ext_r - 32, rG)], ALERT)
 
     # infraestructura: el pipeline crea los buckets y corre Terraform, que sube el código de las λ
-    s.line([(130 + h, 960), (275, 960)], OPS)
-    s.chip(205, 952, "buckets.sh", OPS)
-    s.line([(130, 960 + h + 40), (130, 1120 - h)], OPS)
-    s.chip(130, 1067, "terraform apply", OPS)
-    s.line([(130 + h, 1118), (400 - h, 1110)], OPS)
-    s.chip(215, 1106, "zips de las λ", OPS)
-    s.line([(400, 1110 - h), (400, 975), (620, 975), (620, 800 + h + 40)], OPS)
-    s.chip(510, 967, "código de las 9 λ", OPS)
-
-    # ------------------------------------------------------------ leyenda
-    lx, ly = 1738, 1188
-    s.box(lx, ly, 244, 132, INK, "#ffffff", width=1)
-    s.text(lx + 12, ly + 20, "Conexiones", 12, INK, weight="bold")
-    legend = [
-        (REQ, None, "pedido del usuario"),
-        (SYNC, None, "lectura o escritura de datos"),
-        (BUS, None, "evento o mensaje"),
-        (ALERT, None, "alarma"),
-        (OPS, None, "pipeline e infraestructura"),
-    ]
-    for i, (color, dash, label) in enumerate(legend):
-        y = ly + 42 + 19 * i
-        s.line([(lx + 12, y - 4), (lx + 52, y - 4)], color, dash=dash)
-        s.text(lx + 62, y, label, 11, INK)
+    s.line([(ext_l + h, rF), (245, rF)], OPS)
+    s.chip(178, rF - 8, "buckets", OPS)
+    s.line([(ext_l, rF + h + 70), (ext_l, rG - h)], OPS)
+    s.line([(ext_l + h, rG), (c1 - h, rG)], OPS)
 
     # ------------------------------------------------------------ notas
     notes = [
-        "Sin VPC: todo es servicio regional administrado (multi-AZ); las funciones lo usan por HTTPS, autorizadas por IAM con LabRole.",
-        "Los 3 buckets de la app los crea el pipeline (scripts/buckets.sh) porque un SCP del lab bloquea aws_s3_bucket; Terraform configura el resto.",
-        "SES: Terraform declara identidades opcionales (count), pero el Learner Lab lo niega; los avisos salen por Gmail con la contraseña en Secrets Manager.",
+        "Sin VPC: todos los servicios son regionales y administrados por AWS; las funciones los usan por HTTPS, con el rol LabRole.",
+        "Los 3 buckets de la app los crea el pipeline con la CLI (un SCP del lab bloquea aws_s3_bucket); Terraform configura todo lo demás.",
     ]
     for i, n in enumerate(notes):
-        s.text(30, 1250 + 20 * i, n, 12, MUTED)
+        s.text(30, 1455 + 24 * i, n, 15, MUTED)
     return s.render()
 
 
