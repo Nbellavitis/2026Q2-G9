@@ -8,10 +8,9 @@ import { QueueStore } from '../../src/persistence/queue-store.js'
 import type { Fixture } from './support.js'
 import { barrier, createQueue, fixture } from './support.js'
 
-// Las cuatro carreras de docs/historial/arquitectura-serverless.md §6.1, que en la versión Java resolvía el
-// `SELECT … FOR UPDATE`. Cada test fuerza el peor caso: una barrera hace que todos los escritores
-// lean la misma versión antes de que cualquiera escriba, así que todos menos uno pierden la primera
-// vez y tienen que releer.
+// Las cuatro carreras de una cola, que en la versión Java resolvía el `SELECT … FOR UPDATE`. Cada
+// test fuerza el peor caso: una barrera hace que todos los escritores lean la misma versión antes
+// de que cualquiera escriba, así que todos menos uno pierden la primera vez y tienen que releer.
 
 let f: Fixture
 

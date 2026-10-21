@@ -1,4 +1,4 @@
-# El bus de eventos (docs/historial/arquitectura-serverless.md §3.4):
+# El bus de eventos:
 #
 #   q-main ──Streams──▶ λ stream-publisher ──▶ SNS FIFO q-queue-events ──┬─▶ SQS FIFO q-push
 #                              │                                         └─▶ SQS q-notifications (filtrada)

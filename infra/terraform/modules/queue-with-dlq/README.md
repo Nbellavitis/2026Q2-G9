@@ -58,8 +58,7 @@ del consumidor.
   que configurar y confirmar la suscripción SNS. El umbral de edad de 10 segundos en push se evalúa
   en períodos de 60 segundos, no garantiza una alerta a los 10 segundos.
 - **La DLQ no recupera errores reconocidos como éxito.** Los consumidores deben reportar las fallas
-  que quieran reintentar. Los errores WebSocket por conexión actualmente se registran y absorben;
-  ver [límites de entrega](../../../../docs/architecture.md#6-concurrency-and-correctness).
+  que quieran reintentar. Los errores WebSocket por conexión actualmente se registran y absorben.
 - **La política de la cola solo admite los tópicos indicados**, con la condición `aws:SourceArn`:
   ningún otro tópico, de esta cuenta o de otra, puede publicar.
 - **`count` para lo opcional:** la política existe solo si hay publicadores, y la alarma de atraso

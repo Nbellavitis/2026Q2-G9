@@ -130,10 +130,9 @@ export class DirectoryStore {
   }
 
   /**
-   * Reserva un aviso antes de enviarlo (docs/historial/arquitectura-serverless.md §6.5). Pasa si
-   * nunca se intentó, si el intento anterior falló, o si quedó PENDING más de `leaseSeconds`: eso
-   * significa que la Lambda que lo reservó murió antes de enviarlo, y sin este caso el aviso no
-   * saldría nunca (el mismo defecto que tenía `retryFailed` en la versión Java).
+   * Reserva un aviso antes de enviarlo. Pasa si nunca se intentó, si el intento anterior falló, o si
+   * quedó PENDING más de `leaseSeconds`: eso significa que la Lambda que lo reservó murió antes de
+   * enviarlo, y sin este caso el aviso no saldría nunca (el mismo defecto que tenía `retryFailed` en la versión Java).
    *
    * Cada reserva cuenta como un intento, porque un intento que muere sin informar también es un
    * intento. Devuelve false si ya se envió o si agotó `maxAttempts`.

@@ -1,7 +1,6 @@
-// Las conexiones WebSocket abiertas, en su propia tabla (q-connections,
-// docs/historial/arquitectura-serverless.md §5.3). Una por navegador, indexada por la cola que
-// mira: el broadcaster encuentra a todos los que hay que avisar con una sola consulta al índice
-// `byQueue`.
+// Las conexiones WebSocket abiertas, en su propia tabla (q-connections). Una por navegador, indexada
+// por la cola que mira: el broadcaster encuentra a todos los que hay que avisar con una sola consulta
+// al índice `byQueue`.
 
 import { DeleteCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb'
 import type { TableConfig } from './client.js'

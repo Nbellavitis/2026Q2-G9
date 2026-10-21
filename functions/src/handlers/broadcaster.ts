@@ -1,5 +1,5 @@
-// λ broadcaster: consume q-push (FIFO, un lote por cola a la vez) y empuja a cada navegador la vista
-// que le corresponde, por el WebSocket (docs/historial/arquitectura-serverless.md §6.4).
+// λ broadcaster: consume q-push (FIFO, un lote por cola a la vez) y empuja a cada navegador la
+// vista que le corresponde, por el WebSocket.
 //
 // No aplica deltas: siempre relee el estado actual. Un evento duplicado, tardío o desordenado puede
 // provocar un push de más, nunca una pantalla incorrecta. Y los eventos de una misma cola que llegan

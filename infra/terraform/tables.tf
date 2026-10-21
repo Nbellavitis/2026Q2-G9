@@ -1,7 +1,6 @@
 # La tabla principal, con el módulo externo de la comunidad. Su forma es la del diseño de tabla
-# única de docs/historial/arquitectura-serverless.md (§5): claves genéricas PK y SK, Streams para el
-# bus de eventos, PITR para poder volver a cualquier segundo de los últimos 35 días, y TTL para los
-# ítems que vencen.
+# única: claves genéricas PK y SK, Streams para el bus de eventos, PITR para poder volver a
+# cualquier segundo de los últimos 35 días, y TTL para los ítems que vencen.
 
 module "main_table" {
   source  = "terraform-aws-modules/dynamodb-table/aws"

@@ -164,7 +164,7 @@ jobs:
             [ -n "${!name}" ] || missing+=("$name")
           done
           if [ ${#missing[@]} -gt 0 ]; then
-            echo "::error::Faltan los secrets ${missing[*]}: copiarlos de AWS Details en el Learner Lab (ver docs/deployment.md)."
+            echo "::error::Faltan los secrets ${missing[*]}: copiarlos de AWS Details en el Learner Lab (ver el paso 2 de la guía del README)."
             exit 1
           fi
 

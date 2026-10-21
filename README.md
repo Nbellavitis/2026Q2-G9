@@ -44,9 +44,7 @@ Terraform desde un pipeline de GitHub Actions**, en una cuenta de AWS Academy Le
 
 ![Arquitectura de Queue en AWS](docs/diagrams/arquitectura.png)
 
-Cada nodo del diagrama es un recurso que crea este Terraform. El diagrama se genera desde código
-([`docs/diagrams/arquitectura.py`](docs/diagrams/arquitectura.py)), así que se actualiza junto con
-la infraestructura.
+Cada nodo del diagrama es un recurso que crea este Terraform.
 
 | Servicio | Para qué |
 |---|---|
@@ -76,9 +74,6 @@ crear roles), CloudFront está bloqueado (por eso el sitio lo sirve API Gateway)
 eso los mails salen por Gmail) y un SCP impide crear buckets con `aws_s3_bucket` (ver
 [Lo que no crea Terraform](#48-lo-que-no-crea-terraform-y-por-qué)).
 
-La [arquitectura detallada](docs/architecture.md) explica cada decisión, la concurrencia y el
-modelo de seguridad.
-
 ---
 
 ## 3. Estructura del repositorio
@@ -95,8 +90,7 @@ infra/terraform/      toda la infraestructura (esta entrega)
   scripts/smoke-realtime.mjs       la prueba de humo del WebSocket
 functions/            las Lambdas en TypeScript: src/handlers (una por función), src/domain, tests
 frontend/             el sitio (Next.js exportado como archivos estáticos)
-docs/                 documentación de referencia y el diagrama
-tp2/                  la entrega del TP2, como quedó
+docs/diagrams/        el diagrama de arquitectura
 ```
 
 ---
@@ -269,8 +263,7 @@ WebSocket.
 El despliegue está completamente automatizado con **GitHub Actions**: el pipeline compila el código,
 crea toda la infraestructura con Terraform y sube la aplicación, sin instalar nada en una máquina
 local. Para levantar la arquitectura en una cuenta de AWS Academy Learner Lab hay que seguir estos
-pasos. La [guía de despliegue detallada](docs/deployment.md) agrega los resultados esperados y qué
-hacer si algo falla.
+pasos.
 
 ### Paso 1: Configurar el repositorio (una sola vez)
 
@@ -365,6 +358,36 @@ Para eliminar toda la infraestructura y no dejar recursos consumiendo crédito e
 Para volver a desplegar, presionar **Re-run all jobs** en la última ejecución del pull request y
 aprobar el apply: el stack se crea de cero.
 
+### Contraseña del usuario de demo
+
+El despliegue crea un usuario de staff de demo, `demo@queue.example`, con una contraseña aleatoria que
+queda en el estado de Terraform (marcada como `sensitive`, así que no aparece en los logs). Para
+probar la app no hace falta: alcanza con registrar una cuenta nueva desde el sitio. Para leerla, con
+Terraform instalado y las credenciales del lab configuradas en la terminal, desde la raíz del
+repositorio:
+
+```bash
+terraform -chdir=infra/terraform init -input=false \
+  -backend-config="bucket=tfstate-q-<cuenta>-us-east-1" \
+  -backend-config="region=us-east-1"
+terraform -chdir=infra/terraform output -raw demo_staff_password
+```
+
+`<cuenta>` es el ID de la cuenta del lab (lo muestra `aws sts get-caller-identity`). Estos comandos
+solo leen el estado: no cambian nada en AWS.
+
+### Si algo falla
+
+| Síntoma | Qué hacer |
+|---|---|
+| El plan falla con `The security token included in the request is invalid` o `expired` | La sesión del lab venció. Cargar de nuevo los tres secrets (paso 2), de la misma sesión, y presionar **Re-run all jobs** |
+| El plan falla en *Credenciales del lab* | Falta alguno de los tres secrets de AWS (paso 2) |
+| Apply o Destroy quedan en cola sin arrancar | Hay otra ejecución esperando aprobación o corriendo: cancelar la que sobra |
+| El apply falló a mitad de camino | Leer el primer error, corregir la causa y presionar **Re-run all jobs**: un plan nuevo parte del estado que quedó |
+| La prueba de humo falló | Los recursos ya están creados. Mirar qué comprobación falló y los logs de la función en CloudWatch |
+| El sitio carga pero no se puede iniciar sesión | Revisar `config.json` en la URL del sitio: tiene que tener los ids de Cognito |
+| Los mails no llegan | Sin `SMTP_SENDER_EMAIL` se simulan: buscar `emailSimulado` en el log de `q-notifier`. Con SMTP, revisar el spam y que `GMAIL_APP_PASSWORD` sea correcta |
+
 ---
 
 ## 7. Uso de la aplicación
@@ -377,8 +400,8 @@ como staff y otra como cliente.
 1. **Crear la cuenta.** En la URL del sitio, presionar **Crear mi primera fila** y completar el nombre
    del negocio, tu nombre, el email y una contraseña de al menos 8 caracteres. La cuenta queda activa
    al instante, sin código de confirmación, y con el negocio creado. También se puede entrar con el
-   usuario de demo, que ya tiene un negocio con dos filas (su contraseña se lee como explica la
-   [guía de despliegue](docs/deployment.md#outputs-and-demo-credentials)).
+   usuario de demo, que ya tiene un negocio con dos filas (ver
+   [Contraseña del usuario de demo](#contraseña-del-usuario-de-demo)).
 2. **Crear una fila.** En el panel, presionar **Nueva fila**, ponerle un nombre y presionar **Crear
    fila**.
 3. **Imprimir el QR.** Desde la fila, abrir el QR y presionar **Imprimir esta hoja**. Es lo que el
@@ -468,18 +491,3 @@ tflint --init && tflint --recursive
 Los tests de Terraform comprueban que la configuración entera planifica con los valores por defecto,
 los contratos de cada módulo y que las validaciones rechazan entradas inválidas. Cada módulo tiene los
 suyos en `modules/*/tests`. El pipeline corre todo esto en cada push.
-
----
-
-## 12. Documentación adicional
-
-| Documento | Contenido |
-|---|---|
-| [docs/deployment.md](docs/deployment.md) | El despliegue en detalle: resultados esperados, recuperación, solución de problemas |
-| [docs/architecture.md](docs/architecture.md) | Las decisiones de arquitectura, la concurrencia, los eventos y la seguridad |
-| [docs/gotchas.md](docs/gotchas.md) | Lo que el Learner Lab no permite y las trampas del pipeline |
-| [docs/domain-model.md](docs/domain-model.md) | Las entidades y sus ítems de DynamoDB, la máquina de estados de una entrada |
-| [docs/api-reference.md](docs/api-reference.md) | Cada endpoint y el contrato del WebSocket |
-| [docs/frontend.md](docs/frontend.md) | Notas del frontend |
-| [docs/historial/](docs/historial/) | Documentos de trabajo de la entrega: la propuesta serverless, el roadmap y el registro de avance |
-| [tp2/](tp2/) | La entrega del TP2: plantilla de CloudFormation y diagrama |

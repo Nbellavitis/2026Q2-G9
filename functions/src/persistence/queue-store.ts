@@ -1,5 +1,4 @@
-// Leer una cola y escribir sus cambios con control optimista
-// (docs/historial/arquitectura-serverless.md §6.1).
+// Leer una cola y escribir sus cambios con control optimista.
 //
 // Hoy cada mutación tomaba `SELECT … FOR UPDATE` sobre la fila de la cola. DynamoDB no tiene locks:
 // el equivalente es leer `META.version`, decidir en memoria y escribir todo en una transacción que
