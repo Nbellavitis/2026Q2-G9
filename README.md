@@ -281,6 +281,7 @@ El estado vive en S3, en `tfstate-q-<cuenta>-<región>`, con la clave `queue/ter
 |---|---|
 | Push al PR (abrirlo, actualizarlo, reabrirlo) | Validar y Compilar → Plan → Apply (espera aprobación) |
 | Etiqueta `destroy` en el PR | Destroy (espera aprobación) |
+| Pull request desde un fork | Validar y Compilar. Plan, Apply y Destroy se saltean, porque el PR no recibe los secrets |
 | *Run workflow* manual (`plan`, `apply` o `destroy`) | Lo elegido; solo si el workflow ya está en la rama por defecto |
 
 **La prueba de humo** comprueba después de cada apply que `/api/v1/health` responde (la función lee
@@ -353,8 +354,9 @@ Con el repositorio configurado y las credenciales cargadas, el despliegue se hac
 request:
 
 1. **Abrir un pull request** desde una rama de este mismo repositorio, o hacer push a uno que ya
-   esté abierto. Tiene que ser una rama del repositorio y no de un fork, porque GitHub no les pasa los
-   secrets a los pull requests que vienen de un fork.
+   esté abierto. Para desplegar tiene que ser una rama del repositorio: GitHub no les pasa los
+   secrets a los pull requests que vienen de un fork. En un PR desde un fork corren Validar y
+   Compilar, y Plan y Apply aparecen como salteados (*skipped*) en lugar de fallar.
 2. **El workflow `Terraform` arranca solo.** Se puede seguir desde la pestaña **Actions** o desde los
    checks del pull request. Ejecuta, en orden:
    * **Validar**: revisa el formato del código Terraform (`terraform fmt`), que la configuración sea

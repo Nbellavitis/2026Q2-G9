@@ -8,6 +8,9 @@
 #   aprobar el environment   apply sobre ese mismo plan, y prueba de humo
 #   etiqueta "destroy"       destroy (también aprobado)
 #
+# Un pull request que viene de un fork no recibe los secrets del repositorio: ahí corren Validar y
+# Compilar, y Plan, Apply y Destroy quedan salteados en lugar de fallar por falta de credenciales.
+#
 # Las credenciales del Learner Lab vencen con cada sesión: antes de correr, hay que actualizar los
 # secrets AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY y AWS_SESSION_TOKEN.
 
@@ -145,7 +148,8 @@ jobs:
     name: Plan
     needs: [validate, build]
     if: >-
-      (github.event_name == 'pull_request' && github.event.action != 'labeled') ||
+      (github.event_name == 'pull_request' && github.event.action != 'labeled' &&
+        github.event.pull_request.head.repo.full_name == github.repository) ||
       (github.event_name == 'workflow_dispatch' && inputs.action != 'destroy')
     runs-on: ubuntu-latest
     steps:
@@ -265,7 +269,8 @@ jobs:
       cancel-in-progress: false
     needs: plan
     if: >-
-      (github.event_name == 'pull_request' && github.event.action != 'labeled') ||
+      (github.event_name == 'pull_request' && github.event.action != 'labeled' &&
+        github.event.pull_request.head.repo.full_name == github.repository) ||
       (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
     runs-on: ubuntu-latest
     # Con revisores obligatorios configurados en el repositorio, el apply espera una aprobación.
@@ -412,7 +417,8 @@ jobs:
     # Sin `needs: build`: limpiar la cuenta del lab no puede depender de que el código compile. Si no,
     # un error de TypeScript dejaría todo desplegado, gastando, hasta arreglarlo.
     if: >-
-      (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'destroy') ||
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'destroy' &&
+        github.event.pull_request.head.repo.full_name == github.repository) ||
       (github.event_name == 'workflow_dispatch' && inputs.action == 'destroy')
     runs-on: ubuntu-latest
     environment: aws-lab
