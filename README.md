@@ -525,7 +525,7 @@ lo que la consigna permite. El código de SES sigue disponible para una cuenta d
 |---|---|
 | **Separar el bucket privado en tres** | `spa` (el sitio), `artifacts` (el código de las Lambdas, versionado) y `logs` (registros de acceso de los otros dos). Los tres privados, con TLS obligatorio, por el módulo `private-bucket` |
 | **«Falta encriptar»: contraseñas en texto plano en el `.env`** | Ninguna contraseña vive en un archivo de configuración: Cognito reemplazó el JWT propio, DynamoDB no tiene contraseña y los servicios se usan con IAM. El único secreto (la contraseña de Gmail) está cifrado en Secrets Manager y fuera del estado de Terraform |
-| **Justificar RDS con el nuevo cómputo** | Se reemplazó por DynamoDB. Con Lambda, RDS obligaría a una VPC, a un NAT y a una contraseña, y cobra aunque nadie use la app. Todo acceso es por cola, que encaja con una partición por cola; la concurrencia se resuelve con una versión por cola y transacciones |
+| **Justificar RDS con el nuevo cómputo** | Elegimos DynamoDB por los patrones de acceso por cola, la capacidad bajo demanda y la integración con Streams. Evita administrar conexiones SQL y simplifica la infraestructura de esta aplicación |
 | **Justificar el pub/sub con el nuevo cómputo** | El `LISTEN/NOTIFY` de PostgreSQL coordinaba varias instancias de EC2. Sin servidores, cada cambio se publica desde el stream de DynamoDB en SNS FIFO (en orden por cola) y se reparte a colas SQS, cada una con su consumidor, su DLQ y su alarma |
 | **Desplegar con IaC** | Todo con Terraform desde el pipeline, con estado remoto, plan guardado y aprobación |
 
