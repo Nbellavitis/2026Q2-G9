@@ -16,25 +16,62 @@
 #   buckets.sh create <bucket-del-estado> <nombre>...   en el orden en que se van a borrar
 #   buckets.sh delete <bucket-del-estado>
 #   buckets.sh delete-state <bucket-del-estado>         al final del destroy, con el estado vacío
+#
+# Cada consulta distingue "no existe" (un 404) de "no se pudo comprobar" (permisos, credenciales
+# vencidas, red, un bucket de otra cuenta). Solo lo primero se toma como ausencia; ante lo segundo se
+# aborta sin tocar nada, y la lista de buckets anotados se conserva para poder reintentar.
 
 set -euo pipefail
 
 RECORD_KEY="queue/buckets.txt"
+# Tope de vueltas al vaciar un bucket: cada una borra hasta 1000 objetos.
+MAX_EMPTY_ROUNDS=500
 
-exists() {
-  aws s3api head-bucket --bucket "$1" >/dev/null 2>&1
+fail() {
+  echo "$*" >&2
+  exit 1
+}
+
+# La cuenta de las credenciales: un bucket de otra cuenta con el mismo nombre no se adopta ni se borra.
+ACCOUNT=$(aws sts get-caller-identity --query Account --output text) ||
+  fail "No se pudieron validar las credenciales de AWS"
+
+# "exists" o "missing". Cualquier otra respuesta de S3 corta el script.
+bucket_status() {
+  local name=$1 out
+  if out=$(aws s3api head-bucket --bucket "$name" --expected-bucket-owner "$ACCOUNT" 2>&1); then
+    echo exists
+  elif grep -qE '\(404\)|Not Found' <<<"$out"; then
+    echo missing
+  else
+    fail "No se pudo comprobar el bucket $name (no se asume que no existe): $out"
+  fi
+}
+
+# La lista de buckets anotados, o nada si todavía no hay. Cualquier otro error corta el script.
+read_record() {
+  local state_bucket=$1 out
+  if out=$(aws s3api head-object --bucket "$state_bucket" --key "$RECORD_KEY" \
+    --expected-bucket-owner "$ACCOUNT" 2>&1); then
+    aws s3 cp "s3://${state_bucket}/${RECORD_KEY}" - --expected-bucket-owner "$ACCOUNT" ||
+      fail "No se pudo leer s3://${state_bucket}/${RECORD_KEY}"
+  elif grep -qE '\(404\)|Not Found|NoSuchKey' <<<"$out"; then
+    return 0
+  else
+    fail "No se pudo leer s3://${state_bucket}/${RECORD_KEY}: $out"
+  fi
 }
 
 create() {
   local state_bucket=$1
   shift
-  [ "$#" -gt 0 ] || { echo "No hay buckets para crear: el plan no trajo bucket_names" >&2; exit 1; }
+  [ "$#" -gt 0 ] || fail "No hay buckets para crear: el plan no trajo bucket_names"
 
   # Los anotados antes y que ya no están en el plan (un bucket renombrado) se conservan, delante de
   # los nuevos: el destroy tiene que seguir encontrándolos, y el de logs sigue quedando último.
-  local previous name wanted
+  local previous name wanted status
   local -a kept=()
-  previous=$(aws s3 cp "s3://${state_bucket}/${RECORD_KEY}" - 2>/dev/null || true)
+  previous=$(read_record "$state_bucket")
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     for wanted in "$@"; do
@@ -44,11 +81,12 @@ create() {
   done <<<"$previous"
 
   printf '%s\n' "${kept[@]}" "$@" | sed '/^$/d' |
-    aws s3 cp - "s3://${state_bucket}/${RECORD_KEY}" --no-progress >/dev/null
+    aws s3 cp - "s3://${state_bucket}/${RECORD_KEY}" --no-progress --expected-bucket-owner "$ACCOUNT" >/dev/null
   echo "Anotados en s3://${state_bucket}/${RECORD_KEY}"
 
   for name in "$@"; do
-    if exists "$name"; then
+    status=$(bucket_status "$name")
+    if [ "$status" = exists ]; then
       echo "Ya existe: $name"
       continue
     fi
@@ -64,25 +102,53 @@ create() {
   done
 }
 
-# Borra todas las versiones y marcas de borrado, de a 1000 (el máximo de delete-objects).
+# Borra todas las versiones y marcas de borrado, de a 1000 (el máximo de delete-objects). S3 puede
+# aceptar el pedido y rechazar objetos sueltos: se revisa `Errors` en cada vuelta, porque si no, el
+# mismo objeto volvería a aparecer en el listado siguiente para siempre.
 empty() {
-  local name=$1 listing batch count
-  while :; do
-    listing=$(aws s3api list-object-versions --bucket "$name" --max-items 1000 --output json)
+  local name=$1 listing batch count result errors round
+  for ((round = 1; round <= MAX_EMPTY_ROUNDS; round++)); do
+    listing=$(aws s3api list-object-versions --bucket "$name" --max-items 1000 \
+      --expected-bucket-owner "$ACCOUNT" --output json)
     # Un bucket vacío puede no devolver nada: se toma como un listado sin objetos.
     [ -n "$listing" ] || listing='{}'
     batch=$(jq -c '{Objects: ([(.Versions // [])[], (.DeleteMarkers // [])[]] | map({Key, VersionId})), Quiet: true}' \
       <<<"$listing")
     count=$(jq '.Objects | length' <<<"$batch")
     [ "$count" -gt 0 ] || return 0
-    aws s3api delete-objects --bucket "$name" --delete "$batch" >/dev/null
+    result=$(aws s3api delete-objects --bucket "$name" --delete "$batch" \
+      --expected-bucket-owner "$ACCOUNT" --output json)
+    [ -n "$result" ] || result='{}'
+    errors=$(jq '(.Errors // []) | length' <<<"$result")
+    if [ "$errors" -gt 0 ]; then
+      echo "S3 no pudo borrar $errors objetos de $name:" >&2
+      jq -r '.Errors[:10][] | "  \(.Key) (versión \(.VersionId // "-")): \(.Code) \(.Message)"' <<<"$result" >&2
+      exit 1
+    fi
+  done
+  fail "No se terminó de vaciar $name después de $MAX_EMPTY_ROUNDS vueltas"
+}
+
+# Vacía y borra un bucket. S3 entrega los registros de acceso con minutos de atraso: alguno puede
+# llegar al bucket de logs entre que se vacía y se borra, así que se reintenta en lugar de fallar.
+remove_bucket() {
+  local name=$1 attempt
+  echo "Vaciando y borrando: $name"
+  for attempt in 1 2 3 4 5 6; do
+    empty "$name"
+    if aws s3api delete-bucket --bucket "$name" --expected-bucket-owner "$ACCOUNT" 2>/dev/null; then
+      return 0
+    fi
+    [ "$attempt" -lt 6 ] || fail "No se pudo borrar $name"
+    sleep 10
   done
 }
 
 delete() {
-  local state_bucket=$1 record name attempt
+  local state_bucket=$1 record name status
   local -a names
-  if ! record=$(aws s3 cp "s3://${state_bucket}/${RECORD_KEY}" - 2>/dev/null); then
+  record=$(read_record "$state_bucket")
+  if [ -z "$record" ]; then
     echo "No hay buckets anotados en s3://${state_bucket}/${RECORD_KEY}: nada que borrar"
     return 0
   fi
@@ -90,40 +156,29 @@ delete() {
 
   for name in "${names[@]}"; do
     [ -n "$name" ] || continue
-    if ! exists "$name"; then
+    status=$(bucket_status "$name")
+    if [ "$status" = missing ]; then
       echo "Ya no existe: $name"
       continue
     fi
-    echo "Vaciando y borrando: $name"
-    # S3 entrega los registros de acceso con minutos de atraso: alguno puede llegar al bucket de logs
-    # entre que se vacía y se borra. Se reintenta en lugar de fallar.
-    for attempt in 1 2 3 4 5 6; do
-      empty "$name"
-      if aws s3api delete-bucket --bucket "$name" 2>/dev/null; then break; fi
-      if [ "$attempt" -eq 6 ]; then echo "No se pudo borrar $name" >&2; exit 1; fi
-      sleep 10
-    done
+    remove_bucket "$name"
   done
 
-  aws s3 rm "s3://${state_bucket}/${RECORD_KEY}" --only-show-errors
+  # Recién con todos borrados se quita la lista: si algo falló antes, sigue ahí para reintentar.
+  aws s3 rm "s3://${state_bucket}/${RECORD_KEY}" --only-show-errors --expected-bucket-owner "$ACCOUNT"
 }
 
 # Vacía y borra el bucket del estado, todas sus versiones incluidas. Solo después de un destroy
 # completo: el workflow comprueba antes que el estado no tenga recursos. El apply siguiente lo vuelve
 # a crear (.github/actions/terraform-init).
 delete_state() {
-  local state_bucket=$1 attempt
-  if ! exists "$state_bucket"; then
+  local state_bucket=$1 status
+  status=$(bucket_status "$state_bucket")
+  if [ "$status" = missing ]; then
     echo "Ya no existe: $state_bucket"
     return 0
   fi
-  echo "Vaciando y borrando: $state_bucket"
-  for attempt in 1 2 3 4 5 6; do
-    empty "$state_bucket"
-    if aws s3api delete-bucket --bucket "$state_bucket" 2>/dev/null; then return 0; fi
-    if [ "$attempt" -eq 6 ]; then echo "No se pudo borrar $state_bucket" >&2; exit 1; fi
-    sleep 10
-  done
+  remove_bucket "$state_bucket"
 }
 
 case "${1:-}" in
