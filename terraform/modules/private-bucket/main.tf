@@ -2,11 +2,11 @@
 # viaja por TLS y la propiedad de los objetos es siempre de la cuenta (sin ACLs). Versionado,
 # expiración y registros de acceso son opcionales, porque no los necesita cada bucket.
 #
-# El bucket en sí no se crea acá: lo crea el pipeline (infra/terraform/scripts/buckets.sh) antes del
-# apply. Después de crear un `aws_s3_bucket`, el provider lee su configuración de object lock, y el SCP
-# del Learner Lab niega esa lectura con un deny explícito; ninguna de las versiones ensayadas del
-# provider (4.67, 5.100 y 6.67) lo tolera. Todo lo que va sobre el bucket sí se administra acá, y cada
-# una de esas lecturas está permitida.
+# El bucket en sí no se crea acá: lo crea el pipeline (terraform/organization/scripts/buckets.sh)
+# antes del apply. Después de crear un `aws_s3_bucket`, el provider lee su configuración de object
+# lock, y el SCP del Learner Lab niega esa lectura con un deny explícito; ninguna de las versiones
+# ensayadas del provider (4.67, 5.100 y 6.67) lo tolera. Todo lo que va sobre el bucket sí se
+# administra acá, y cada una de esas lecturas está permitida.
 
 data "aws_partition" "current" {}
 

@@ -120,7 +120,7 @@ when that plan was generated.
 
 The lab denied the object-lock read performed by the provider after creating an `aws_s3_bucket`.
 The pipeline therefore creates the three application buckets using
-[`scripts/buckets.sh`](../infra/terraform/scripts/buckets.sh), with names read from `bucket_names`
+[`scripts/buckets.sh`](../terraform/organization/scripts/buckets.sh), with names read from `bucket_names`
 in the saved plan. The script records the names in `queue/buckets.txt` in the state bucket before
 creation. Terraform manages their access blocks, ownership, versioning, policy, access logs,
 expiration and objects. After Terraform destroy, the script empties and deletes those buckets,
@@ -175,7 +175,7 @@ duplicate emails and swallowed per-connection WebSocket errors. These are not fi
 
 ### Outputs and demo credentials
 
-The full list is in [outputs.tf](../infra/terraform/outputs.tf). URLs, table/function names,
+The full list is in [outputs.tf](../terraform/organization/outputs.tf). URLs, table/function names,
 Cognito IDs and `stream_mapping_uuid` identify resources in the console. Demo outputs can be null
 when `demo_enabled = false`; SMTP outputs can be null when it is not configured.
 
@@ -185,10 +185,10 @@ in Terraform state and the plan. Registering another staff account avoids needin
 To inspect the password, authenticate AWS for the same account and, from the repository root, run:
 
 ```bash
-terraform -chdir=infra/terraform init -input=false \
+terraform -chdir=terraform/organization init -input=false \
   -backend-config="bucket=tfstate-q-<account>-us-east-1" \
   -backend-config="region=us-east-1"
-terraform -chdir=infra/terraform output -raw demo_staff_password
+terraform -chdir=terraform/organization output -raw demo_staff_password
 ```
 
 Replace `<account>` with the actual account ID; use the configured region in both arguments when

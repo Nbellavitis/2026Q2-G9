@@ -1,5 +1,6 @@
-// λ seed: carga los datos de demo que la consigna permite. La invoca Terraform una vez al desplegar,
-// con el contenido de infra/terraform/seed/demo.json y el usuario de staff que creó en Cognito.
+// λ seed: carga los datos de demo que la consigna permite. La invoca Terraform una vez al
+// desplegar, con el contenido de terraform/organization/seed/demo.json y el usuario de staff que
+// creó en Cognito.
 //
 // Usa las mismas operaciones del dominio que la API, en lugar de escribir ítems a mano: así los datos
 // de demo tienen exactamente la forma que espera el resto del código. Es idempotente: lo que ya existe

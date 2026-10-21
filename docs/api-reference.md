@@ -2,7 +2,7 @@
 
 Base path `/api/v1`, under the API Gateway stage: `https://<api-id>.execute-api.us-east-1.amazonaws.com/prod/api/v1`.
 The same API serves the site, so the browser calls it with relative URLs and there is no CORS.
-Every route is declared in [`infra/terraform/openapi.tf`](../infra/terraform/openapi.tf) (35 routes)
+Every route is declared in [`terraform/organization/openapi.tf`](../terraform/organization/openapi.tf) (35 routes)
 and handled by one of two Lambdas: `public` or `staff`.
 
 Two audiences share one API:

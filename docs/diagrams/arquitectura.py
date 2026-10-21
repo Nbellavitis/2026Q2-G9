@@ -2,7 +2,7 @@
 """
 Diagrama de arquitectura de Queue (TP3), con la convención de AWS: AWS Cloud, la región y los
 servicios conectados entre sí. Lo de afuera de AWS (el navegador, GitHub Actions, Gmail) queda
-afuera del borde. Cada nodo es un recurso del Terraform de infra/terraform.
+afuera del borde. Cada nodo es un recurso del Terraform de terraform/organization.
 
     python3 docs/diagrams/arquitectura.py      # escribe arquitectura.svg al lado de este archivo
     node docs/diagrams/render.mjs              # y lo exporta a arquitectura.png

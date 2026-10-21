@@ -9,8 +9,8 @@ import { DirectoryStore } from '../../src/persistence/directory-store.js'
 import { QueueStore } from '../../src/persistence/queue-store.js'
 
 /**
- * Una tabla nueva con la misma forma que crea Terraform en `infra/terraform/tables.tf`: PK y SK
- * string, on-demand y con Streams. Si una cambia, la otra tiene que cambiar igual.
+ * Una tabla nueva con la misma forma que crea Terraform en `terraform/organization/tables.tf`: PK y
+ * SK string, on-demand y con Streams. Si una cambia, la otra tiene que cambiar igual.
  */
 export async function createTestTable(): Promise<TableConfig> {
   const endpoint = inject('dynamodbEndpoint')

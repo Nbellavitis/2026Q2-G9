@@ -16,7 +16,7 @@ resource "aws_sns_topic" "queue_events" {
 }
 
 module "queues" {
-  source   = "./modules/queue-with-dlq"
+  source   = "../modules/queue-with-dlq"
   for_each = local.queues
 
   name                       = format("%s-%s", var.project, each.key)

@@ -1,6 +1,6 @@
-# La configuración entera en modo plan, sin AWS: `terraform test` en infra/terraform. Comprueba que el
-# plan se puede armar (los count y for_each se conocen antes del apply) y algunas decisiones de la
-# raíz. Las de cada módulo están en modules/*/tests.
+# La configuración entera en modo plan, sin AWS: `terraform test` en terraform/organization.
+# Comprueba que el plan se puede armar (los count y for_each se conocen antes del apply) y algunas
+# decisiones de la raíz. Las de cada módulo están en terraform/modules/*/tests.
 
 mock_provider "aws" {
   mock_data "aws_caller_identity" {

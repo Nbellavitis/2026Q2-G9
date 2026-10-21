@@ -2,7 +2,7 @@
 # auth.tf, por el mismo motivo.
 
 module "api_functions" {
-  source   = "./modules/lambda-function"
+  source   = "../modules/lambda-function"
   for_each = local.api_functions
 
   name               = format("%s-%s", var.project, each.key)
@@ -17,7 +17,7 @@ module "api_functions" {
 }
 
 module "workers" {
-  source   = "./modules/lambda-function"
+  source   = "../modules/lambda-function"
   for_each = local.workers
 
   name               = format("%s-%s", var.project, each.key)

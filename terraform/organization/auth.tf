@@ -75,7 +75,7 @@ resource "aws_cognito_user_pool_client" "web" {
 # La función del trigger va aparte del mapa de functions.tf: el user pool la referencia, y la función
 # del staff referencia al user pool. En el mismo for_each, eso sería un ciclo.
 module "pre_signup" {
-  source = "./modules/lambda-function"
+  source = "../modules/lambda-function"
 
   name               = format("%s-cognito-pre-signup", var.project)
   description        = "Confirma en el acto las cuentas que se registran."

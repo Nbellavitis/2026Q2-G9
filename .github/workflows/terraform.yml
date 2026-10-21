@@ -34,7 +34,10 @@ env:
   NODE_VERSION: 22
   # La región, en un solo lugar: configura las credenciales y llega a Terraform como var.region.
   AWS_REGION: us-east-1
-  TF_DIR: infra/terraform
+  # La estructura de la plantilla de la cátedra: la raíz en terraform/organization y los módulos en
+  # terraform/modules. Formato y tflint corren sobre las dos; init, plan y apply, sobre la raíz.
+  TF_BASE: terraform
+  TF_DIR: terraform/organization
   # El stage de la API, en un solo lugar: el frontend se compila con esta ruta base, y el plan y el
   # destroy se lo pasan a Terraform como var.api_stage_name.
   API_STAGE: prod
@@ -57,7 +60,7 @@ jobs:
 
       - name: Formato
         run: terraform fmt -check -recursive -diff
-        working-directory: ${{ env.TF_DIR }}
+        working-directory: ${{ env.TF_BASE }}
 
       - name: Validación
         working-directory: ${{ env.TF_DIR }}
@@ -71,7 +74,7 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: |
           terraform test
-          for module in modules/*/; do
+          for module in ../modules/*/; do
             echo "::group::$module"
             (cd "$module" && terraform init -backend=false -input=false >/dev/null && terraform test)
             echo "::endgroup::"
@@ -82,7 +85,7 @@ jobs:
           tflint_version: ${{ env.TFLINT_VERSION }}
 
       - name: tflint
-        working-directory: ${{ env.TF_DIR }}
+        working-directory: ${{ env.TF_BASE }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |

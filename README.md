@@ -2,6 +2,13 @@
 
 ITBA 82.08 Cloud Computing · Grupo 9.
 
+| Integrante | Legajo |
+|---|---|
+| Bellavitis Alzate, Nicolás | 64001 |
+| Benegas Lynch, José María | 64242 |
+| Galán, Agustín | 64098 |
+| Koron, Nicolás | 64094 |
+
 Queue es una plataforma de filas virtuales para restaurantes, comercios y cualquier mostrador donde
 la gente espera. El cliente escanea un QR, se anota con su nombre y un mail, y sigue su turno desde
 el celular. El staff maneja la fila desde un panel.
@@ -14,7 +21,7 @@ Terraform desde un pipeline de GitHub Actions**, en una cuenta de AWS Academy Le
 
 | Consigna | Sección |
 |---|---|
-| Archivos Terraform completos | [`infra/terraform/`](infra/terraform/) · [Terraform](#4-terraform) |
+| Archivos Terraform completos | [`terraform/`](terraform/) · [Terraform](#4-terraform) |
 | Implementación de correcciones previas | [Correcciones del TP2](#9-correcciones-del-tp2) |
 | Mínimo un módulo propio y uno externo | [Módulos](#42-módulos) |
 | Variables y outputs | [Variables y outputs](#46-variables-y-outputs) |
@@ -58,11 +65,31 @@ Cada nodo del diagrama es un recurso que crea este Terraform.
 | S3 | Tres buckets privados: el sitio, el código de las Lambdas y los logs de acceso. Más el del estado de Terraform |
 | CloudWatch | Logs de las funciones y alarmas (mensajes en una DLQ, cola atrasada, fallas del stream) que avisan por SNS |
 
-**Cómo fluye un cambio.** Toda escritura es una transacción en `q-main` que guarda el cambio y su
-evento juntos. El stream de la tabla lleva el evento a `stream-publisher`, que lo publica en SNS FIFO
-(en orden por cola). De ahí salen tres colas SQS: `q-push` (el `broadcaster` empuja la vista nueva
-por WebSocket), `q-notifications` (el `notifier` decide y manda los mails) y `q-lifecycle` (vence
-los períodos de gracia y libera las colas cerradas).
+**Flujo de datos**, recorriendo el diagrama:
+
+1. El navegador pide el sitio a **API Gateway REST**, que lo lee del bucket privado **S3 spa** con
+   `LabRole`. Junto con el sitio baja `config.json`, que Terraform genera con los ids de Cognito y la
+   URL del WebSocket.
+2. El staff se registra e inicia sesión directo contra **Cognito**. Un trigger
+   (`λ cognito-pre-signup`) confirma la cuenta al instante, y Cognito devuelve un token.
+3. El navegador llama a la API en `/api/v1`. Las rutas públicas (anotarse, ver el ticket, salir de
+   la fila) van a **`λ public`**. Las del staff llevan el token, que API Gateway valida contra
+   Cognito antes de invocar a **`λ staff`**. Cada operación es una transacción en **DynamoDB
+   `q-main`** que guarda el cambio y el evento que lo describe, juntos.
+4. Para ver los cambios en vivo, el navegador abre una conexión con **API Gateway WebSocket**.
+   **`λ ws-connections`** valida el ticket y registra la conexión en **`q-connections`**.
+5. **DynamoDB Streams** entrega cada evento a **`λ stream-publisher`**, que lo publica en **SNS
+   FIFO**, en orden por cola. Cada llamado va además a **SQS `q-lifecycle`** con una demora igual al
+   período de gracia, y cada cierre de cola, sin demora.
+6. SNS reparte cada evento a dos colas:
+   * **SQS `q-push`** → **`λ broadcaster`** lee el estado actual y lo empuja por el WebSocket al
+     tablero del staff y al ticket de cada cliente.
+   * **SQS `q-notifications`** → **`λ notifier`** decide qué avisos corresponden, toma la contraseña
+     de **Secrets Manager** y manda los mails por el **SMTP de Gmail**.
+7. **`λ lifecycle`** aplica la política de ausencia cuando vence la gracia, o libera la cola cerrada,
+   escribiendo en `q-main`. Ese cambio vuelve a entrar por el paso 5.
+8. Un mensaje que falla todos sus reintentos cae en la **DLQ** de su cola. Una alarma de
+   **CloudWatch** avisa por **SNS `q-alerts`** al mail del equipo.
 
 **Sin VPC.** No hay servidores ni bases con IP privada que proteger: todos los servicios son
 regionales y administrados por AWS (multi-AZ), y las funciones los usan por HTTPS, autorizadas por
@@ -79,11 +106,12 @@ eso los mails salen por Gmail) y un SCP impide crear buckets con `aws_s3_bucket`
 ## 3. Estructura del repositorio
 
 ```
-infra/terraform/      toda la infraestructura (esta entrega)
+terraform/            toda la infraestructura (esta entrega), con la estructura de la plantilla
+  organization/       la configuración raíz: la que se inicializa, se planifica y se aplica
+    scripts/buckets.sh  crea y borra los buckets de la app (ver 4.8)
+    seed/demo.json      los datos de demo
+    tests/            terraform test de la raíz
   modules/            los tres módulos propios, cada uno con README y tests
-  scripts/buckets.sh  crea y borra los buckets de la app (ver 4.8)
-  seed/demo.json      los datos de demo
-  tests/              terraform test de la raíz
 .github/
   workflows/terraform.yml          el pipeline
   actions/terraform-init/          init con el backend remoto, compartido por plan, apply y destroy
@@ -100,11 +128,14 @@ docs/diagrams/        el diagrama de arquitectura
 ### 4.1 Versiones y archivos
 
 El pipeline usa Terraform `1.16.4`; la configuración admite `>=1.10.0, <2.0.0` porque usa el bloqueo
-nativo de S3. [`versions.tf`](infra/terraform/versions.tf) fija los providers AWS `~>6.67.0`,
-Archive `~>2.8.0` y Random `~>3.9.0`, y el [lockfile](infra/terraform/.terraform.lock.hcl) versionado
+nativo de S3. [`versions.tf`](terraform/organization/versions.tf) fija los providers AWS `~>6.67.0`,
+Archive `~>2.8.0` y Random `~>3.9.0`, y el [lockfile](terraform/organization/.terraform.lock.hcl) versionado
 fija las versiones exactas y sus checksums.
 
-Los archivos están separados por responsabilidad:
+El código sigue la estructura de la plantilla del repositorio de la entrega: la configuración raíz en
+[`terraform/organization`](terraform/organization/) y los módulos propios en
+[`terraform/modules`](terraform/modules/). En la raíz, los archivos están separados por
+responsabilidad:
 
 | Archivos | Qué tienen |
 |---|---|
@@ -124,12 +155,13 @@ además la cuenta y la región, así no chocan en ninguna cuenta.
 
 | Módulo | Tipo | Se usa en | Qué encapsula |
 |---|---|---|---|
-| [`lambda-function`](infra/terraform/modules/lambda-function/README.md) | Propio | 9 funciones (`functions.tf`, `auth.tf`) | Empaqueta el bundle (`archive_file`), lo sube versionado al bucket de código, crea la función y su log group con retención. Devuelve nombre, ARN, ARN de invocación y hash del código |
-| [`private-bucket`](infra/terraform/modules/private-bucket/README.md) | Propio | 3 buckets (`storage.tf`) | Sobre un bucket existente: bloqueo de acceso público, propiedad de objetos, versionado, ciclo de vida y logs opcionales, y una política que exige TLS |
-| [`queue-with-dlq`](infra/terraform/modules/queue-with-dlq/README.md) | Propio | 3 colas (`events.tf`) | Cola estándar o FIFO con su DLQ, redrive, permiso para que SNS publique y alarmas de DLQ y de atraso |
+| [`lambda-function`](terraform/modules/lambda-function/README.md) | Propio | 9 funciones (`functions.tf`, `auth.tf`) | Empaqueta el bundle (`archive_file`), lo sube versionado al bucket de código, crea la función y su log group con retención. Devuelve nombre, ARN, ARN de invocación y hash del código |
+| [`private-bucket`](terraform/modules/private-bucket/README.md) | Propio | 3 buckets (`storage.tf`) | Sobre un bucket existente: bloqueo de acceso público, propiedad de objetos, versionado, ciclo de vida y logs opcionales, y una política que exige TLS |
+| [`queue-with-dlq`](terraform/modules/queue-with-dlq/README.md) | Propio | 3 colas (`events.tf`) | Cola estándar o FIFO con su DLQ, redrive, permiso para que SNS publique y alarmas de DLQ y de atraso |
 | [`terraform-aws-modules/dynamodb-table/aws`](https://registry.terraform.io/modules/terraform-aws-modules/dynamodb-table/aws/5.5.2) | Externo, versión `5.5.2` fija | 2 tablas (`tables.tf`) | Claves, índice secundario, TTL, Streams y PITR |
 
-Cada módulo propio tiene su README con entradas y salidas, y sus propios tests. Las funciones están
+Cada módulo propio tiene su README, con las decisiones de diseño, un ejemplo de uso y la referencia
+de entradas y salidas generada con terraform-docs, y sus propios tests. Las funciones están
 en dos instancias del módulo (`api_functions` y `workers`) para evitar un ciclo: la API REST
 depende de las funciones de la API, y algunos workers necesitan la URL de esa API.
 
@@ -169,9 +201,9 @@ Se usan los cuatro:
 
 ### 4.5 Locals y datasources
 
-[`locals.tf`](infra/terraform/locals.tf) deriva todo lo que no es una entrada: el sufijo de cuenta y
+[`locals.tf`](terraform/organization/locals.tf) deriva todo lo que no es una entrada: el sufijo de cuenta y
 región, los tags, los nombres de los buckets, los mapas de funciones y de colas, los datos de demo y
-los objetos del sitio con su tipo MIME. [`openapi.tf`](infra/terraform/openapi.tf) arma las 35 rutas
+los objetos del sitio con su tipo MIME. [`openapi.tf`](terraform/organization/openapi.tf) arma las 35 rutas
 de la API desde dos listas: sumar un endpoint es sumar una línea.
 
 | Datasource | Para qué |
@@ -211,7 +243,7 @@ Outputs: `site_url`, `health_url`, `websocket_url`, `user_pool_id` y `user_pool_
 ### 4.7 Estado remoto y bloqueo
 
 El estado vive en S3, en `tfstate-q-<cuenta>-<región>`, con la clave `queue/terraform.tfstate`
-([`backend.tf`](infra/terraform/backend.tf)):
+([`backend.tf`](terraform/organization/backend.tf)):
 
 - El bucket lo crea la acción [`terraform-init`](.github/actions/terraform-init/action.yml) la
   primera vez que el pipeline corre en una cuenta, privado y versionado. Tiene que existir antes del
@@ -227,7 +259,7 @@ El estado vive en S3, en `tfstate-q-<cuenta>-<región>`, con la clave `queue/ter
 
 | Qué | Quién lo hace | Por qué |
 |---|---|---|
-| Los 3 buckets de la app | [`scripts/buckets.sh`](infra/terraform/scripts/buckets.sh), desde el pipeline, con los nombres que define Terraform | Después de crear un `aws_s3_bucket`, el provider lee su configuración de object lock y un SCP del lab niega esa lectura (`AccessDenied` con deny explícito). Terraform configura todo lo demás del bucket (módulo `private-bucket`) |
+| Los 3 buckets de la app | [`scripts/buckets.sh`](terraform/organization/scripts/buckets.sh), desde el pipeline, con los nombres que define Terraform | Después de crear un `aws_s3_bucket`, el provider lee su configuración de object lock y un SCP del lab niega esa lectura (`AccessDenied` con deny explícito). Terraform configura todo lo demás del bucket (módulo `private-bucket`) |
 | El bucket del estado | La acción `terraform-init` | Tiene que existir antes del `init` |
 | El valor de la contraseña SMTP | El job Apply, con la AWS CLI, después del apply | Por Terraform quedaría en texto plano en el plan guardado y en el estado |
 
@@ -255,6 +287,15 @@ El estado vive en S3, en `tfstate-q-<cuenta>-<región>`, con la clave `queue/ter
 y escribe en DynamoDB), que el sitio y `config.json` cargan, que una ruta inexistente da la página
 404, y que un cliente puede anotarse en la cola de demo y que un cambio en su ticket le llega por
 WebSocket.
+
+**Los workflows de la cátedra.** El repositorio de la entrega trae tres workflows propios de la
+cátedra, que corren en paralelo al nuestro en cada pull request y no dependen de él:
+
+| Workflow | Qué hace | Qué esperar |
+|---|---|---|
+| `terraform-format.yml` | `terraform fmt -check -recursive` con Terraform 1.1.7 | Pasa: el código está formateado (probado con esa versión) |
+| `tfsec.yaml` | Análisis de seguridad del Terraform | Reporta los hallazgos que se explican en [Seguridad](#10-seguridad-hallazgos-de-tfsec) |
+| `terraform-docs.yml` | Genera la documentación de los módulos de `terraform/modules` y la commitea en la rama del PR | No debería encontrar cambios: el README de cada módulo ya tiene esa sección, generada con la misma versión de terraform-docs que usa el workflow. Si hubiera algo que commitear, necesita que el token del workflow tenga permiso de escritura |
 
 ---
 
@@ -367,10 +408,10 @@ Terraform instalado y las credenciales del lab configuradas en la terminal, desd
 repositorio:
 
 ```bash
-terraform -chdir=infra/terraform init -input=false \
+terraform -chdir=terraform/organization init -input=false \
   -backend-config="bucket=tfstate-q-<cuenta>-us-east-1" \
   -backend-config="region=us-east-1"
-terraform -chdir=infra/terraform output -raw demo_staff_password
+terraform -chdir=terraform/organization output -raw demo_staff_password
 ```
 
 `<cuenta>` es el ID de la cuenta del lab (lo muestra `aws sts get-caller-identity`). Estos comandos
@@ -481,13 +522,15 @@ cd functions && npm ci && npm test        # unitarios e integración (necesita D
 ```
 
 ```bash
-cd infra/terraform
-terraform fmt -check -recursive
+cd terraform
+terraform fmt -check -recursive           # la raíz y los módulos
+tflint --init && tflint --recursive
+cd organization
 terraform init -backend=false && terraform validate
 terraform test                            # en modo plan, con providers simulados: no usa AWS
-tflint --init && tflint --recursive
+for module in ../modules/*/; do (cd "$module" && terraform init -backend=false && terraform test); done
 ```
 
 Los tests de Terraform comprueban que la configuración entera planifica con los valores por defecto,
 los contratos de cada módulo y que las validaciones rechazan entradas inválidas. Cada módulo tiene los
-suyos en `modules/*/tests`. El pipeline corre todo esto en cada push.
+suyos en `terraform/modules/*/tests`. El pipeline corre todo esto en cada push.

@@ -41,7 +41,7 @@ CLAUDE.md
 tfplan
 plan.txt
 terraform.tfvars
-infra/terraform/.build/
+terraform/organization/.build/
 
 # Funciones: los bundles se generan en el pipeline
 functions/dist/

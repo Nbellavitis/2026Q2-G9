@@ -6,7 +6,7 @@
 # (scripts/buckets.sh), con los nombres del output `bucket_names`, y los borra después del destroy.
 
 module "logs_bucket" {
-  source = "./modules/private-bucket"
+  source = "../modules/private-bucket"
 
   name                        = local.bucket_names.logs
   versioning_enabled          = false
@@ -15,7 +15,7 @@ module "logs_bucket" {
 }
 
 module "private_buckets" {
-  source   = "./modules/private-bucket"
+  source   = "../modules/private-bucket"
   for_each = local.logged_buckets
 
   name               = local.logged_bucket_names[each.key]
