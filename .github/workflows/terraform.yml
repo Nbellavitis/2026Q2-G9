@@ -355,12 +355,15 @@ jobs:
           done
           echo
 
-          curl -fsS -o index.html "$site" && grep -qi '<html' index.html || { echo "La portada no devolvió HTML"; exit 1; }
+          if ! { curl -fsS -o index.html "$site" && grep -qi '<html' index.html; }; then
+            echo "La portada no devolvió HTML"; exit 1
+          fi
           curl -fsS -o /dev/null "${site}login/" || { echo "La página de login no cargó"; exit 1; }
           # Una ruta que no existe: la página 404 del sitio, no el XML de S3.
           status=$(curl -sS -o not-found.html -w '%{http_code}' -H 'Accept: text/html' "${site}no-existe/")
-          [ "$status" = 404 ] && grep -qi '<html' not-found.html \
-            || { echo "Una ruta inexistente respondió $status sin la página 404"; cat not-found.html; exit 1; }
+          if ! { [ "$status" = 404 ] && grep -qi '<html' not-found.html; }; then
+            echo "Una ruta inexistente respondió $status sin la página 404"; cat not-found.html; exit 1
+          fi
           curl -fsS "${site}config.json" | jq -e '.userPoolId and .userPoolClientId' >/dev/null \
             || { echo "config.json no tiene los ids de Cognito"; exit 1; }
 
@@ -445,11 +448,14 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          # Destruir nunca crea el backend: si no hay estado, no hay nada que destruir o se perdió.
+          create-state-bucket: "false"
 
       # Sin refresh: refrescar un bucket creado con `aws_s3_bucket` (como el que dejó la primera
       # corrida) repite la lectura de object lock que el SCP del lab niega, y el destroy fallaría
       # antes de borrar nada. Destruir lo que dice el estado alcanza.
       - name: Destroy
+        if: steps.init.outputs.state-found == 'true'
         working-directory: ${{ env.TF_DIR }}
         env:
           TF_VAR_api_stage_name: ${{ env.API_STAGE }}
@@ -458,6 +464,7 @@ jobs:
 
       # Los buckets los creó el pipeline, así que los borra el pipeline, en el orden anotado.
       - name: Borrar los buckets
+        if: steps.init.outputs.state-found == 'true'
         working-directory: ${{ env.TF_DIR }}
         env:
           STATE_BUCKET: ${{ steps.init.outputs.state-bucket }}
@@ -468,6 +475,7 @@ jobs:
       # si el estado de verdad no tiene recursos: si quedara alguno, se conserva para no perderle el
       # rastro.
       - name: Borrar el bucket del estado
+        if: steps.init.outputs.state-found == 'true'
         working-directory: ${{ env.TF_DIR }}
         env:
           STATE_BUCKET: ${{ steps.init.outputs.state-bucket }}

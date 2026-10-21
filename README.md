@@ -254,6 +254,12 @@ El estado vive en S3, en `tfstate-q-<cuenta>-<región>`, con la clave `queue/ter
   hace falta una tabla de DynamoDB.
 - En el pipeline, además, apply y destroy comparten un grupo de concurrencia, y plan, apply y
   destroy esperan el lock hasta 10 minutos (`-lock-timeout=10m`) en vez de fallar.
+- El destroy nunca crea el bucket del estado. Si no existe, o si existe sin estado ni buckets
+  anotados, no hay nada desplegado en esa cuenta y el job lo informa. Si hay buckets anotados pero no
+  estado, el estado se perdió: el job corta con error en lugar de declarar "0 destruidos".
+- El estado y el plan guardado (un artefacto del workflow que vence en un día) contienen valores
+  sensibles, como la contraseña del usuario de demo: `sensitive` solo los oculta en la salida. Por eso
+  el bucket del estado es privado y la contraseña SMTP nunca pasa por Terraform.
 
 ### 4.8 Lo que no crea Terraform, y por qué
 
@@ -452,6 +458,9 @@ solo leen el estado: no cambian nada en AWS.
 | El apply falló a mitad de camino | Leer el primer error, corregir la causa y presionar **Re-run all jobs**: un plan nuevo parte del estado que quedó |
 | La prueba de humo falló | Los recursos ya están creados. Mirar qué comprobación falló y los logs de la función en CloudWatch |
 | El sitio carga pero no se puede iniciar sesión | Revisar `config.json` en la URL del sitio: tiene que tener los ids de Cognito |
+| El destroy informa que no hay nada desplegado | No existe el bucket del estado, o existe sin estado ni buckets anotados: en esa cuenta nunca se aplicó nada, o ya se destruyó |
+| El destroy corta porque hay buckets anotados pero no el estado | El estado se perdió. Revisar las versiones del bucket del estado (está versionado) y restaurar la última antes de reintentar |
+| `buckets.sh` corta con "No se pudo comprobar…" o "S3 no pudo borrar…" | Un permiso, una credencial vencida o un objeto protegido. El mensaje dice cuál; la lista de buckets anotados se conserva, así que se puede reintentar |
 | Los mails no llegan | Sin `SMTP_SENDER_EMAIL` se simulan: buscar `emailSimulado` en el log de `q-notifier`. Con SMTP, revisar el spam y que `GMAIL_APP_PASSWORD` sea correcta |
 
 ---
