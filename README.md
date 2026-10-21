@@ -1,7 +1,7 @@
 # Queue — Tercera Entrega (IaC con Terraform)
 
 ITBA 82.08 Cloud Computing · Grupo 9.
-
+s
 | Integrante | Legajo |
 |---|---|
 | Bellavitis Alzate, Nicolás | 64001 |
