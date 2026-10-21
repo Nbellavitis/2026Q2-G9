@@ -148,7 +148,7 @@ def build(icons):
     # ------------------------------------------------------------ afuera de AWS
     s.node("user", ext_l, rB, "Navegador", "cliente y staff")
     s.node("gha", ext_l, rF, "GitHub\nActions", "el pipeline", color=OPS)
-    s.node("tf", ext_l, rG, "Terraform", color=OPS)
+    s.node("tf", ext_l, rG, "Terraform", "crea y configura todo", color=OPS)
     s.mail(ext_r, rE, "Gmail\nSMTP", "mails a clientes")
     s.mail(ext_r, rG, "Mail del\nequipo", "alarmas")
 
@@ -159,7 +159,7 @@ def build(icons):
     s.node("apigw", c1, rB, "API Gateway\nREST", "sitio + /api/v1")
     s.node("lambda", c2, rB, "λ staff", "panel y llamados")
     s.node("ddb", c3, rB, "DynamoDB\nq-main", "tabla única")
-    s.node("s3", c1, rC, "S3 spa", "sitio (privado)")
+    s.node("s3", c1, rC, "S3 spa", "lo sube Terraform")
     s.node("lambda", c2, rC, "λ public", "anotarse y ticket")
     s.node("apigw", c1, rE, "API Gateway\nWebSocket", "tiempo real")
     s.node("lambda", c2, rE, "λ ws-connections", "abre y cierra")
@@ -245,6 +245,7 @@ def build(icons):
     s.chip(178, rF - 8, "buckets", OPS)
     s.line([(ext_l, rF + h + 70), (ext_l, rG - h)], OPS)
     s.line([(ext_l + h, rG), (c1 - h, rG)], OPS)
+    s.chip(232, rG - 8, "sube el código", OPS)
 
     # ------------------------------------------------------------ notas
     notes = [
