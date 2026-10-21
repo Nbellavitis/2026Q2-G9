@@ -39,7 +39,7 @@ const nextConfig: NextConfig = {
 function developmentConfig(): NextConfig {
   const deployed = process.env.DEV_API_URL?.replace(/\/$/, '')
   if (!deployed) {
-    throw new Error('Set DEV_API_URL in frontend/.env.local to the site_url output of Terraform (see .env.example).')
+    throw new Error('Set DEV_API_URL in frontend/.env.local to the site_url output of Terraform.')
   }
   return {
     ...nextConfig,
